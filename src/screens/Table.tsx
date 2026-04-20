@@ -5,6 +5,7 @@ import TopBar from "../components/TopBar";
 import { db } from "../db/db";
 import { nextSeat } from "../utils/poker";
 import { formatStakes } from "../utils/format";
+import StackPicker from "../components/StackPicker";
 
 export default function TableScreen() {
   const { id } = useParams();
@@ -149,22 +150,11 @@ export default function TableScreen() {
                   {p.name || <span className="text-neutral-500">（名前）</span>}
                 </button>
               )}
-              <div className="w-28">
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  placeholder="Stack"
-                  onFocus={(e) => e.currentTarget.select()}
-                  value={p.stack ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    updatePlayer(p.seat, {
-                      stack: v === "" ? undefined : parseFloat(v) || 0,
-                    });
-                  }}
-                  className="text-right"
-                />
-              </div>
+              <StackPicker
+                value={p.stack}
+                bb={session.bb}
+                onChange={(v) => updatePlayer(p.seat, { stack: v })}
+              />
             </div>
             <div className="flex flex-wrap gap-2 mt-2 text-xs">
               <button

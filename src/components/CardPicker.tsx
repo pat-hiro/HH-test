@@ -6,28 +6,30 @@ export default function CardPicker({
   onChange,
   exclude = [],
   label,
+  size = "md",
 }: {
   value: string | null;
   onChange: (c: string | null) => void;
   exclude?: string[];
   label?: string;
+  size?: "sm" | "md";
 }) {
   const [open, setOpen] = useState(false);
-  const [rank, setRank] = useState<string | null>(value?.[0] ?? null);
 
-  const pick = (r: string, s: string) => {
-    const card = `${r}${s}`;
+  const pick = (card: string) => {
     onChange(card);
-    setRank(null);
     setOpen(false);
   };
+
+  const faceSize =
+    size === "sm" ? "w-10 h-14 text-base" : "w-12 h-16 text-lg";
 
   return (
     <div className="inline-block">
       {label && <div className="text-xs text-neutral-400 mb-1">{label}</div>}
       <button
         onClick={() => setOpen(true)}
-        className="w-14 h-20 border border-neutral-700 rounded bg-neutral-900 flex items-center justify-center font-mono text-xl"
+        className={`${faceSize} border border-neutral-700 rounded bg-neutral-900 flex items-center justify-center font-mono`}
       >
         {value ? (
           <span className={suitColor(value[1])}>
@@ -47,58 +49,57 @@ export default function CardPicker({
             className="bg-neutral-900 w-full p-3 rounded-t-xl border-t border-neutral-800"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex justify-between items-center mb-2">
-              <div className="text-sm text-neutral-400">
-                {rank ? "スートを選択" : "ランクを選択"}
-              </div>
-              {value && (
-                <button
-                  onClick={() => {
-                    onChange(null);
-                    setOpen(false);
-                  }}
-                  className="text-xs text-red-400"
-                >
-                  クリア
-                </button>
-              )}
-            </div>
-            {!rank && (
-              <div className="grid grid-cols-7 gap-2">
-                {RANKS.map((r) => (
+            <div className="flex justify-between items-center mb-3">
+              <div className="text-sm text-neutral-400">カード選択</div>
+              <div className="flex gap-2">
+                {value && (
                   <button
-                    key={r}
-                    onClick={() => setRank(r)}
-                    className="py-3 bg-neutral-800 rounded font-mono text-lg"
+                    onClick={() => {
+                      onChange(null);
+                      setOpen(false);
+                    }}
+                    className="text-xs text-red-400 px-2 py-1"
                   >
-                    {r}
+                    クリア
                   </button>
-                ))}
+                )}
+                <button
+                  onClick={() => setOpen(false)}
+                  className="text-xs text-neutral-400 px-2 py-1"
+                >
+                  閉じる
+                </button>
               </div>
-            )}
-            {rank && (
-              <div className="grid grid-cols-4 gap-2">
-                {SUITS.map((s) => {
-                  const card = `${rank}${s}`;
-                  const disabled = exclude.includes(card);
+            </div>
+            <div
+              className="grid gap-1"
+              style={{ gridTemplateColumns: "repeat(13, minmax(0, 1fr))" }}
+            >
+              {SUITS.map((s) =>
+                RANKS.map((r) => {
+                  const card = `${r}${s}`;
+                  const disabled = exclude.includes(card) && card !== value;
+                  const selected = card === value;
                   return (
                     <button
-                      key={s}
+                      key={card}
                       disabled={disabled}
-                      onClick={() => pick(rank, s)}
-                      className={`py-4 rounded font-mono text-2xl ${
+                      onClick={() => pick(card)}
+                      className={`aspect-[3/4] rounded flex flex-col items-center justify-center font-mono leading-none ${
                         disabled
-                          ? "bg-neutral-800 opacity-30"
-                          : "bg-neutral-800"
+                          ? "opacity-20 bg-neutral-800"
+                          : selected
+                            ? "bg-felt-700 border border-felt-700"
+                            : "bg-neutral-800"
                       } ${suitColor(s)}`}
                     >
-                      {rank}
-                      {suitSymbol(s)}
+                      <span className="font-bold text-[13px]">{r}</span>
+                      <span className="text-[13px]">{suitSymbol(s)}</span>
                     </button>
                   );
-                })}
-              </div>
-            )}
+                })
+              )}
+            </div>
           </div>
         </div>
       )}

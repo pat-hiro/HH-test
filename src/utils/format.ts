@@ -1,7 +1,13 @@
 import type { RakeConfig, Session } from "../db/types";
 
-export function formatStakes(s: Pick<Session, "sb" | "bb">): string {
-  return `${s.sb}/${s.bb}`;
+export function formatStakes(
+  s: Pick<Session, "sb" | "bb" | "ante" | "autoStraddle">
+): string {
+  const parts = [String(s.sb), String(s.bb)];
+  if (s.autoStraddle) parts.push(String(s.bb * 2));
+  let str = parts.join("/");
+  if (s.ante && s.ante > 0) str += `(${s.ante})`;
+  return str;
 }
 
 export function formatGame(s: Pick<Session, "game" | "gameOther">): string {

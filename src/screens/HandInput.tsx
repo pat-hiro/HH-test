@@ -341,50 +341,59 @@ export default function HandInputScreen() {
 
       <div className="p-3">
         {street !== "PF" && (
-          <div className="mb-3">
-            <div className="text-xs text-neutral-400 mb-1">Board</div>
-            <div className="flex gap-2 flex-wrap">
-              {[0, 1, 2].map((i) => (
+          <div className="mb-3 bg-neutral-900 border border-neutral-800 rounded p-3">
+            <div className="flex items-end gap-3">
+              <div>
+                <div className="text-[10px] text-neutral-500 mb-1">Flop</div>
+                <div className="flex gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <CardPicker
+                      key={`f${i}`}
+                      size="sm"
+                      value={hand.board.flop?.[i] ?? null}
+                      exclude={usedCards}
+                      onChange={(c) => {
+                        const cur = hand.board.flop ?? [null, null, null];
+                        const next = [...cur] as [
+                          string | null,
+                          string | null,
+                          string | null
+                        ];
+                        next[i] = c;
+                        if (next[0] && next[1] && next[2]) {
+                          setBoard({
+                            flop: [next[0], next[1], next[2]] as [
+                              string,
+                              string,
+                              string
+                            ],
+                          });
+                        } else {
+                          setBoard({ flop: null });
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] text-neutral-500 mb-1">Turn</div>
                 <CardPicker
-                  key={`f${i}`}
-                  value={hand.board.flop?.[i] ?? null}
-                  exclude={usedCards}
-                  onChange={(c) => {
-                    const cur = hand.board.flop ?? [null, null, null];
-                    const next = [...cur] as [
-                      string | null,
-                      string | null,
-                      string | null
-                    ];
-                    next[i] = c;
-                    if (next[0] && next[1] && next[2]) {
-                      setBoard({
-                        flop: [next[0], next[1], next[2]] as [
-                          string,
-                          string,
-                          string
-                        ],
-                      });
-                    } else {
-                      setBoard({ flop: null });
-                    }
-                  }}
-                />
-              ))}
-              {street !== "F" && (
-                <CardPicker
+                  size="sm"
                   value={hand.board.turn ?? null}
                   exclude={usedCards}
                   onChange={(c) => setBoard({ turn: c })}
                 />
-              )}
-              {street === "R" && (
+              </div>
+              <div>
+                <div className="text-[10px] text-neutral-500 mb-1">River</div>
                 <CardPicker
+                  size="sm"
                   value={hand.board.river ?? null}
                   exclude={usedCards}
                   onChange={(c) => setBoard({ river: c })}
                 />
-              )}
+              </div>
             </div>
           </div>
         )}

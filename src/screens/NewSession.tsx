@@ -159,6 +159,9 @@ export default function NewSessionScreen() {
             <select value={game} onChange={(e) => setGame(e.target.value)}>
               <option>NLH</option>
               <option>PLO</option>
+              <option>Squid</option>
+              <option>Sushi</option>
+              <option>72o</option>
               <option>Other</option>
             </select>
             {game === "Other" && (
@@ -219,7 +222,7 @@ export default function NewSessionScreen() {
             />
           </div>
           <div>
-            <label>Ante（BB ante 可）</label>
+            <label>Ante（BB ante）</label>
             <input
               type="number"
               onFocus={(e) => e.currentTarget.select()}
