@@ -17,17 +17,26 @@ export type PostKind = "SB" | "BB" | "SB_BB" | "DEAD";
 
 export type EventType = "EXPOSED_CARD" | "MISDEAL" | "NOTE";
 
+export interface RakeConfig {
+  percent: number;
+  cap: number;
+  useTimeRake: boolean;
+  timeAmount: number;
+  timeIntervalMin: number;
+}
+
 export interface SessionTemplate {
   id?: number;
   name: string;
   casino: string;
   game: string;
-  stakesLabel: string;
+  gameOther: string;
   sb: number;
   bb: number;
   ante: number;
-  rake: string;
+  rake: RakeConfig;
   seats: number;
+  autoStraddle: boolean;
 }
 
 export interface Session {
@@ -37,12 +46,11 @@ export interface Session {
   date: string;
   casino: string;
   game: string;
-  stakesLabel: string;
+  gameOther: string;
   sb: number;
   bb: number;
   ante: number;
-  rake: string;
-  tableLabel: string;
+  rake: RakeConfig;
   seats: number;
   heroSeat: number | null;
   note: string;

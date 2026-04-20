@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import TopBar from "../components/TopBar";
 import { db } from "../db/db";
-import type { SessionTemplate } from "../db/types";
+import type { RakeConfig, SessionTemplate } from "../db/types";
 
 function todayStr(): string {
   const d = new Date();
@@ -12,42 +12,64 @@ function todayStr(): string {
   return `${d.getFullYear()}-${m}-${dd}`;
 }
 
+const defaultRake = (): RakeConfig => ({
+  percent: 5,
+  cap: 0,
+  useTimeRake: false,
+  timeAmount: 0,
+  timeIntervalMin: 30,
+});
+
 export default function NewSessionScreen() {
   const nav = useNavigate();
   const templates = useLiveQuery(() => db.templates.toArray(), []);
+  const pastCasinos = useLiveQuery(
+    () =>
+      db.sessions.toArray().then((ss) => {
+        const counts = new Map<string, number>();
+        for (const s of ss) {
+          if (!s.casino) continue;
+          counts.set(s.casino, (counts.get(s.casino) ?? 0) + 1);
+        }
+        return Array.from(counts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([c]) => c);
+      }),
+    []
+  );
 
   const [date, setDate] = useState(todayStr());
   const [casino, setCasino] = useState("");
   const [game, setGame] = useState("NLH");
-  const [stakesLabel, setStakesLabel] = useState("1/3");
+  const [gameOther, setGameOther] = useState("");
   const [sb, setSb] = useState(1);
-  const [bb, setBb] = useState(3);
+  const [bb, setBb] = useState(2);
   const [ante, setAnte] = useState(0);
-  const [rake, setRake] = useState("10% max 5");
-  const [tableLabel, setTableLabel] = useState("");
+  const [rake, setRake] = useState<RakeConfig>(defaultRake());
   const [seats, setSeats] = useState(9);
+  const [autoStraddle, setAutoStraddle] = useState(false);
   const [note, setNote] = useState("");
   const [templateName, setTemplateName] = useState("");
 
+  const sbManuallyEditedRef = useRef(false);
+
   useEffect(() => {
-    if (stakesLabel.match(/^(\d+(\.\d+)?)\s*\/\s*(\d+(\.\d+)?)$/)) {
-      const parts = stakesLabel.split("/").map((p) => parseFloat(p.trim()));
-      if (!isNaN(parts[0]) && !isNaN(parts[1])) {
-        setSb(parts[0]);
-        setBb(parts[1]);
-      }
+    if (!sbManuallyEditedRef.current) {
+      setSb(bb / 2);
     }
-  }, [stakesLabel]);
+  }, [bb]);
 
   const applyTemplate = (t: SessionTemplate) => {
     setCasino(t.casino);
     setGame(t.game);
-    setStakesLabel(t.stakesLabel);
+    setGameOther(t.gameOther ?? "");
     setSb(t.sb);
     setBb(t.bb);
     setAnte(t.ante);
-    setRake(t.rake);
+    setRake(t.rake ?? defaultRake());
     setSeats(t.seats);
+    setAutoStraddle(t.autoStraddle ?? false);
+    sbManuallyEditedRef.current = true;
   };
 
   const saveTemplate = async () => {
@@ -56,12 +78,13 @@ export default function NewSessionScreen() {
       name: templateName.trim(),
       casino,
       game,
-      stakesLabel,
+      gameOther,
       sb,
       bb,
       ante,
       rake,
       seats,
+      autoStraddle,
     });
     setTemplateName("");
   };
@@ -73,17 +96,16 @@ export default function NewSessionScreen() {
       date,
       casino,
       game,
-      stakesLabel,
+      gameOther,
       sb,
       bb,
       ante,
       rake,
-      tableLabel,
       seats,
       heroSeat: null,
       note,
       buttonSeat: null,
-      autoStraddle: false,
+      autoStraddle,
       straddleSeats: [],
     });
     for (let i = 1; i <= seats; i++) {
@@ -139,77 +161,176 @@ export default function NewSessionScreen() {
               <option>PLO</option>
               <option>Other</option>
             </select>
+            {game === "Other" && (
+              <input
+                className="mt-2"
+                value={gameOther}
+                onChange={(e) => setGameOther(e.target.value)}
+                placeholder="ゲーム名を入力"
+              />
+            )}
           </div>
+
           <div className="col-span-2">
             <label>カジノ</label>
             <input
-              list="casino-list"
               value={casino}
               onChange={(e) => setCasino(e.target.value)}
               placeholder="例: Bellagio"
             />
-            <datalist id="casino-list">
-              {templates?.map((t) => (
-                <option key={t.id} value={t.casino} />
-              ))}
-            </datalist>
+            {pastCasinos && pastCasinos.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {pastCasinos.slice(0, 12).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setCasino(c)}
+                    className={`px-3 py-1 rounded text-sm ${
+                      casino === c ? "bg-felt-700" : "bg-neutral-800"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <div>
-            <label>ステークス</label>
-            <input
-              value={stakesLabel}
-              onChange={(e) => setStakesLabel(e.target.value)}
-              placeholder="1/3"
-            />
-          </div>
-          <div>
-            <label>テーブル</label>
-            <input
-              value={tableLabel}
-              onChange={(e) => setTableLabel(e.target.value)}
-              placeholder="任意"
-            />
-          </div>
+
           <div>
             <label>SB</label>
             <input
               type="number"
+              inputMode="decimal"
               value={sb}
-              onChange={(e) => setSb(parseFloat(e.target.value) || 0)}
+              onChange={(e) => {
+                sbManuallyEditedRef.current = true;
+                setSb(parseFloat(e.target.value) || 0);
+              }}
             />
           </div>
           <div>
             <label>BB</label>
             <input
               type="number"
+              inputMode="decimal"
               value={bb}
               onChange={(e) => setBb(parseFloat(e.target.value) || 0)}
             />
           </div>
           <div>
-            <label>Ante</label>
+            <label>Ante（BB ante 可）</label>
             <input
               type="number"
+              inputMode="decimal"
               value={ante}
               onChange={(e) => setAnte(parseFloat(e.target.value) || 0)}
             />
           </div>
           <div>
-            <label>Seat数</label>
-            <select
-              value={seats}
-              onChange={(e) => setSeats(parseInt(e.target.value, 10))}
+            <label>オートストラドル</label>
+            <button
+              onClick={() => setAutoStraddle((v) => !v)}
+              className={`w-full py-2 rounded ${
+                autoStraddle ? "bg-felt-700" : "bg-neutral-800"
+              }`}
             >
-              <option value={6}>6</option>
-              <option value={8}>8</option>
-              <option value={9}>9</option>
-              <option value={10}>10</option>
-            </select>
+              {autoStraddle ? "ON" : "OFF"}
+            </button>
           </div>
+
           <div className="col-span-2">
-            <label>レーキ</label>
-            <input value={rake} onChange={(e) => setRake(e.target.value)} />
+            <label>Seat数</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { n: 9, label: "Full ring (9)" },
+                { n: 6, label: "6max" },
+                { n: 2, label: "HU" },
+              ].map((o) => (
+                <button
+                  key={o.n}
+                  onClick={() => setSeats(o.n)}
+                  className={`py-2 rounded text-sm ${
+                    seats === o.n ? "bg-felt-700" : "bg-neutral-800"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
+
+          <div className="col-span-2 bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
+            <div className="text-sm text-neutral-300">レーキ</div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label>％</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={rake.percent}
+                  onChange={(e) =>
+                    setRake({
+                      ...rake,
+                      percent: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                />
+              </div>
+              <div>
+                <label>Cap</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={rake.cap}
+                  onChange={(e) =>
+                    setRake({ ...rake, cap: parseFloat(e.target.value) || 0 })
+                  }
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                checked={rake.useTimeRake}
+                onChange={(e) =>
+                  setRake({ ...rake, useTimeRake: e.target.checked })
+                }
+              />
+              タイムレーキを使う
+            </label>
+            {rake.useTimeRake && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label>金額</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={rake.timeAmount}
+                    onChange={(e) =>
+                      setRake({
+                        ...rake,
+                        timeAmount: parseFloat(e.target.value) || 0,
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <label>間隔(分)</label>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={rake.timeIntervalMin}
+                    onChange={(e) =>
+                      setRake({
+                        ...rake,
+                        timeIntervalMin: parseFloat(e.target.value) || 0,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="col-span-2">
             <label>メモ</label>
             <textarea

@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
 import TopBar from "../components/TopBar";
 import { exportSessionCSV, exportSessionJSON } from "../utils/export";
+import { formatGame, formatStakes } from "../utils/format";
 
 export default function SessionListScreen() {
   const sessions = useLiveQuery(
@@ -31,7 +32,7 @@ export default function SessionListScreen() {
               <div>
                 <div className="font-semibold">{s.casino || "(カジノ未設定)"}</div>
                 <div className="text-xs text-neutral-400">
-                  {s.date} · {s.stakesLabel} · {s.game}
+                  {s.date} · {formatStakes(s)} · {formatGame(s)}
                 </div>
               </div>
               <div className="text-xs text-neutral-500">#{s.id}</div>

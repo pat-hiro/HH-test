@@ -4,6 +4,7 @@ import { useState } from "react";
 import TopBar from "../components/TopBar";
 import { db } from "../db/db";
 import { nextSeat } from "../utils/poker";
+import { formatStakes } from "../utils/format";
 
 export default function TableScreen() {
   const { id } = useParams();
@@ -93,7 +94,7 @@ export default function TableScreen() {
   return (
     <div className="pb-28">
       <TopBar
-        title={`${session.casino || "セッション"} · ${session.stakesLabel}`}
+        title={`${session.casino || "セッション"} · ${formatStakes(session)}`}
         back="/"
         right={
           <button
