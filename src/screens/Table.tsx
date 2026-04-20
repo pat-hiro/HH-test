@@ -1,11 +1,11 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useState } from "react";
 import TopBar from "../components/TopBar";
 import { db } from "../db/db";
 import { nextSeat } from "../utils/poker";
 import { formatStakes } from "../utils/format";
 import StackPicker from "../components/StackPicker";
+import NamePicker from "../components/NamePicker";
 
 export default function TableScreen() {
   const { id } = useParams();
@@ -31,15 +31,19 @@ export default function TableScreen() {
   );
   const nameSuggestions = useLiveQuery(
     () =>
-      db.players
-        .toArray()
-        .then((ps) =>
-          Array.from(new Set(ps.map((p) => p.name).filter((n) => n.length > 0)))
-        ),
+      db.players.toArray().then((ps) => {
+        const counts = new Map<string, number>();
+        for (const p of ps) {
+          const n = p.name.trim();
+          if (!n) continue;
+          counts.set(n, (counts.get(n) ?? 0) + 1);
+        }
+        return Array.from(counts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([n]) => n);
+      }),
     []
   );
-
-  const [editing, setEditing] = useState<number | null>(null);
 
   if (!session || !players) return null;
 
@@ -59,9 +63,11 @@ export default function TableScreen() {
 
   const startHand = async () => {
     const now = Date.now();
-    const active = players.filter((p) => !p.isAway).map((p) => p.seat);
+    const active = players
+      .filter((p) => !p.isAway && p.name.trim() !== "")
+      .map((p) => p.seat);
     if (active.length < 2) {
-      alert("プレイヤーが足りません（最低2人）");
+      alert("プレイヤーが足りません（最低2人、名前未入力は空席扱い）");
       return;
     }
     let button = session.buttonSeat;
@@ -124,32 +130,12 @@ export default function TableScreen() {
               <div className="w-10 text-center font-mono text-neutral-400">
                 S{p.seat}
               </div>
-              {editing === p.seat ? (
-                <input
-                  autoFocus
-                  list="name-suggestions"
-                  defaultValue={p.name}
-                  onBlur={(e) => {
-                    updatePlayer(p.seat, { name: e.target.value });
-                    setEditing(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      updatePlayer(p.seat, {
-                        name: (e.target as HTMLInputElement).value,
-                      });
-                      setEditing(null);
-                    }
-                  }}
-                />
-              ) : (
-                <button
-                  onClick={() => setEditing(p.seat)}
-                  className="flex-1 text-left py-2"
-                >
-                  {p.name || <span className="text-neutral-500">（名前）</span>}
-                </button>
-              )}
+              <NamePicker
+                value={p.name}
+                suggestions={nameSuggestions ?? []}
+                onChange={(name) => updatePlayer(p.seat, { name })}
+                className="flex-1 text-left py-2"
+              />
               <StackPicker
                 value={p.stack}
                 bb={session.bb}
@@ -212,12 +198,6 @@ export default function TableScreen() {
           </li>
         ))}
       </ul>
-
-      <datalist id="name-suggestions">
-        {nameSuggestions?.map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
 
       <div className="fixed bottom-0 inset-x-0 max-w-xl mx-auto p-3 bg-neutral-950/95 border-t border-neutral-800">
         <button
