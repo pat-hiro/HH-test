@@ -6,7 +6,7 @@ import CardPicker from "../components/CardPicker";
 import AmountInput from "../components/AmountInput";
 import { db } from "../db/db";
 import type { ActionType, Street } from "../db/types";
-import { bbSeat, computeStreetState, handIsOver, sbSeat } from "../utils/poker";
+import { bbSeat, computeStreetState, handIsOver, nextSeat, sbSeat } from "../utils/poker";
 import { formatCard } from "../utils/cards";
 
 type PendingAmount = {
@@ -70,82 +70,103 @@ export default function HandInputScreen() {
     const sb = sbSeat(hand.buttonSeat, seats, active);
     const bb = bbSeat(hand.buttonSeat, seats, active);
     if (sb === null || bb === null) return;
+    const utg = nextSeat(bb, seats, active);
 
     (async () => {
-      let order = 0;
-      for (const p of players) {
-        if (p.isAway || !active.includes(p.seat)) continue;
-        if (hand.ante > 0) {
-          await db.actions.add({
-            handId: handDbId,
-            order: order++,
-            street: "PF",
-            seat: p.seat,
-            type: "ANTE",
-            amount: hand.ante,
-            totalPutIn: hand.ante,
-            isAllIn: false,
-          });
-        }
-      }
-      for (const p of players) {
-        if (!active.includes(p.seat)) continue;
-        if (p.mustPostSB) {
-          await db.actions.add({
-            handId: handDbId,
-            order: order++,
-            street: "PF",
-            seat: p.seat,
-            type: "POST",
-            amount: hand.sb,
-            totalPutIn: hand.sb,
-            isAllIn: false,
-          });
-        }
-        if (p.mustPostBB) {
-          await db.actions.add({
-            handId: handDbId,
-            order: order++,
-            street: "PF",
-            seat: p.seat,
-            type: "POST",
-            amount: hand.bb,
-            totalPutIn: hand.bb,
-            isAllIn: false,
-          });
-        }
-      }
-      await db.actions.add({
-        handId: handDbId,
-        order: order++,
-        street: "PF",
-        seat: sb,
-        type: "BLIND_SB",
-        amount: hand.sb,
-        totalPutIn: hand.sb,
-        isAllIn: false,
-      });
-      await db.actions.add({
-        handId: handDbId,
-        order: order++,
-        street: "PF",
-        seat: bb,
-        type: "BLIND_BB",
-        amount: hand.bb,
-        totalPutIn: hand.bb,
-        isAllIn: false,
-      });
-      for (const p of players) {
-        if (!active.includes(p.seat)) continue;
-        if (p.mustPostSB || p.mustPostBB) {
-          if (p.id !== undefined) {
-            await db.players.update(p.id, {
-              mustPostSB: false,
-              mustPostBB: false,
+      await db.transaction("rw", [db.actions, db.players], async () => {
+        const existing = await db.actions
+          .where({ handId: handDbId })
+          .filter((a) => a.type === "BLIND_BB")
+          .first();
+        if (existing) return;
+
+        let order = 0;
+        for (const p of players) {
+          if (p.isAway || !active.includes(p.seat)) continue;
+          if (hand.ante > 0) {
+            await db.actions.add({
+              handId: handDbId,
+              order: order++,
+              street: "PF",
+              seat: p.seat,
+              type: "ANTE",
+              amount: hand.ante,
+              totalPutIn: hand.ante,
+              isAllIn: false,
             });
           }
         }
-      }
+        for (const p of players) {
+          if (!active.includes(p.seat)) continue;
+          if (p.mustPostSB) {
+            await db.actions.add({
+              handId: handDbId,
+              order: order++,
+              street: "PF",
+              seat: p.seat,
+              type: "POST",
+              amount: hand.sb,
+              totalPutIn: hand.sb,
+              isAllIn: false,
+            });
+          }
+          if (p.mustPostBB) {
+            await db.actions.add({
+              handId: handDbId,
+              order: order++,
+              street: "PF",
+              seat: p.seat,
+              type: "POST",
+              amount: hand.bb,
+              totalPutIn: hand.bb,
+              isAllIn: false,
+            });
+          }
+        }
+        await db.actions.add({
+          handId: handDbId,
+          order: order++,
+          street: "PF",
+          seat: sb,
+          type: "BLIND_SB",
+          amount: hand.sb,
+          totalPutIn: hand.sb,
+          isAllIn: false,
+        });
+        await db.actions.add({
+          handId: handDbId,
+          order: order++,
+          street: "PF",
+          seat: bb,
+          type: "BLIND_BB",
+          amount: hand.bb,
+          totalPutIn: hand.bb,
+          isAllIn: false,
+        });
+        if (session.autoStraddle && utg !== null) {
+          await db.actions.add({
+            handId: handDbId,
+            order: order++,
+            street: "PF",
+            seat: utg,
+            type: "STRADDLE",
+            amount: hand.bb * 2,
+            totalPutIn: hand.bb * 2,
+            isAllIn: false,
+          });
+        }
+        for (const p of players) {
+          if (!active.includes(p.seat)) continue;
+          if (p.mustPostSB || p.mustPostBB) {
+            if (p.id !== undefined) {
+              await db.players.update(p.id, {
+                mustPostSB: false,
+                mustPostBB: false,
+              });
+            }
+          }
+        }
+      });
     })();
   }, [hand, players, session, actions, blindsPosted, handDbId]);
 
@@ -215,6 +236,20 @@ export default function HandInputScreen() {
   const canCall = state ? state.currentSeat !== null && state.toCall(state.currentSeat) > 0 : false;
   const canBet = state ? state.currentBet === 0 : false;
   const canRaise = state ? state.currentBet > 0 : false;
+
+  const firstToActPF = (() => {
+    if (!session) return null;
+    const bb = bbSeat(hand.buttonSeat, session.seats, hand.activeSeats);
+    if (bb === null) return null;
+    return nextSeat(bb, session.seats, hand.activeSeats);
+  })();
+  const straddleExists = actions.some((a) => a.type === "STRADDLE");
+  const canStraddle =
+    street === "PF" &&
+    state?.currentSeat != null &&
+    state.currentSeat === firstToActPF &&
+    state.currentBet === hand.bb &&
+    !straddleExists;
 
   const streetIsFinished = state?.done ?? false;
   const isOver = handIsOver(hand, actions);
@@ -363,6 +398,11 @@ export default function HandInputScreen() {
                 {currentPlayer.name || "—"}
               </span>
             </div>
+            {currentPlayer.stack !== undefined && (
+              <div className="text-xs text-neutral-400 mt-1">
+                Stack {currentPlayer.stack}
+              </div>
+            )}
           </div>
         )}
 
@@ -399,6 +439,28 @@ export default function HandInputScreen() {
             >
               ALL-IN
             </button>
+            {canStraddle && (
+              <button
+                onClick={async () => {
+                  if (state?.currentSeat == null) return;
+                  const nextOrder =
+                    (actions[actions.length - 1]?.order ?? -1) + 1;
+                  await db.actions.add({
+                    handId: handDbId,
+                    order: nextOrder,
+                    street: "PF",
+                    seat: state.currentSeat,
+                    type: "STRADDLE",
+                    amount: hand.bb * 2,
+                    totalPutIn: hand.bb * 2,
+                    isAllIn: false,
+                  });
+                }}
+                className="col-span-3 py-4 bg-amber-700 rounded font-bold"
+              >
+                STRADDLE {hand.bb * 2}
+              </button>
+            )}
             {canBet && (
               <button
                 onClick={() => onBtn("BET")}
