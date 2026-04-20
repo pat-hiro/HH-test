@@ -212,7 +212,14 @@ export default function HandInputScreen() {
       return;
     }
     if (type === "RAISE") {
-      const minRaise = state.currentBet + Math.max(state.lastRaiseSize, hand.bb);
+      let openIncrement = hand.bb;
+      if (street === "PF") {
+        const maxStraddle = actions
+          .filter((a) => a.type === "STRADDLE" && a.street === "PF")
+          .reduce((max, a) => Math.max(max, a.amount), 0);
+        if (maxStraddle > 0) openIncrement = maxStraddle;
+      }
+      const minRaise = state.currentBet + Math.max(state.lastRaiseSize, openIncrement);
       setPending({
         type: "RAISE",
         min: minRaise,
@@ -543,9 +550,17 @@ export default function HandInputScreen() {
         </div>
       </div>
 
-      {pending && state && (
+      {pending && state && (() => {
+        const maxStraddle = actions
+          .filter((a) => a.type === "STRADDLE" && a.street === "PF")
+          .reduce((max, a) => Math.max(max, a.amount), 0);
+        const usingStraddleUnit = street === "PF" && maxStraddle > 0;
+        const unitAmount = usingStraddleUnit ? maxStraddle : hand.bb;
+        const unitLabel = usingStraddleUnit ? "STR" : "BB";
+        return (
         <AmountInput
-          bb={hand.bb}
+          unitAmount={unitAmount}
+          unitLabel={unitLabel}
           pot={state.pot}
           toCall={
             state.currentSeat !== null ? state.toCall(state.currentSeat) : 0
@@ -574,7 +589,8 @@ export default function HandInputScreen() {
             await addAction(t, amount);
           }}
         />
-      )}
+        );
+      })()}
 
       {showExposed && (
         <ExposedCardDialog

@@ -1,7 +1,8 @@
 import { useState } from "react";
 
 export default function AmountInput({
-  bb,
+  unitAmount,
+  unitLabel,
   pot,
   toCall,
   min,
@@ -9,7 +10,8 @@ export default function AmountInput({
   onCancel,
   label,
 }: {
-  bb: number;
+  unitAmount: number;
+  unitLabel: string;
   pot: number;
   toCall: number;
   min: number;
@@ -20,12 +22,12 @@ export default function AmountInput({
   const [value, setValue] = useState<string>(String(min || ""));
   const num = parseFloat(value) || 0;
 
-  const preset = (mult: number, basis: "pot" | "bb" | "call") => {
+  const preset = (mult: number, basis: "pot" | "unit" | "call") => {
     let v: number;
     if (basis === "pot") v = pot * mult;
-    else if (basis === "bb") v = bb * mult;
+    else if (basis === "unit") v = unitAmount * mult;
     else v = toCall * mult;
-    v = Math.round(v);
+    v = Math.round(v * 100) / 100;
     setValue(String(v));
   };
 
@@ -41,7 +43,7 @@ export default function AmountInput({
         <div className="text-sm text-neutral-400 mb-2">{label}</div>
         <input
           type="number"
-              onFocus={(e) => e.currentTarget.select()}
+          onFocus={(e) => e.currentTarget.select()}
           inputMode="decimal"
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -49,17 +51,17 @@ export default function AmountInput({
           autoFocus
         />
         <div className="grid grid-cols-4 gap-2 mt-3 text-sm">
-          <button onClick={() => preset(2, "bb")} className="py-2 bg-neutral-800 rounded">
-            2BB
+          <button onClick={() => preset(2, "unit")} className="py-2 bg-neutral-800 rounded">
+            2{unitLabel}
           </button>
-          <button onClick={() => preset(2.5, "bb")} className="py-2 bg-neutral-800 rounded">
-            2.5BB
+          <button onClick={() => preset(2.5, "unit")} className="py-2 bg-neutral-800 rounded">
+            2.5{unitLabel}
           </button>
-          <button onClick={() => preset(3, "bb")} className="py-2 bg-neutral-800 rounded">
-            3BB
+          <button onClick={() => preset(3, "unit")} className="py-2 bg-neutral-800 rounded">
+            3{unitLabel}
           </button>
-          <button onClick={() => preset(4, "bb")} className="py-2 bg-neutral-800 rounded">
-            4BB
+          <button onClick={() => preset(4, "unit")} className="py-2 bg-neutral-800 rounded">
+            4{unitLabel}
           </button>
           <button onClick={() => preset(0.33, "pot")} className="py-2 bg-neutral-800 rounded">
             1/3 pot

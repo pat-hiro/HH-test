@@ -87,9 +87,15 @@ export function computeStreetState(
 
   let firstToAct: number;
   if (street === "PF") {
-    const bb = bbSeat(hand.buttonSeat, seatsTotal, hand.activeSeats);
-    firstToAct =
-      nextSeat(bb ?? hand.buttonSeat, seatsTotal, hand.activeSeats) ?? (bb ?? hand.buttonSeat);
+    const straddle = streetActions.find((a) => a.type === "STRADDLE");
+    if (straddle) {
+      firstToAct =
+        nextSeat(straddle.seat, seatsTotal, hand.activeSeats) ?? straddle.seat;
+    } else {
+      const bb = bbSeat(hand.buttonSeat, seatsTotal, hand.activeSeats);
+      firstToAct =
+        nextSeat(bb ?? hand.buttonSeat, seatsTotal, hand.activeSeats) ?? (bb ?? hand.buttonSeat);
+    }
   } else {
     const sb = sbSeat(hand.buttonSeat, seatsTotal, hand.activeSeats);
     firstToAct = sb ?? hand.buttonSeat;
