@@ -41,6 +41,7 @@ export default function AmountInput({
         <div className="text-sm text-neutral-400 mb-2">{label}</div>
         <input
           type="number"
+              onFocus={(e) => e.currentTarget.select()}
           inputMode="decimal"
           value={value}
           onChange={(e) => setValue(e.target.value)}

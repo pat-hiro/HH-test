@@ -101,6 +101,7 @@ export default function HandResultScreen() {
                   </div>
                   <input
                     type="number"
+              onFocus={(e) => e.currentTarget.select()}
                     inputMode="decimal"
                     value={shares[s] ?? ""}
                     onChange={(e) =>

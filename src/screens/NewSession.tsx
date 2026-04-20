@@ -199,6 +199,7 @@ export default function NewSessionScreen() {
             <label>SB</label>
             <input
               type="number"
+              onFocus={(e) => e.currentTarget.select()}
               inputMode="decimal"
               value={sb}
               onChange={(e) => {
@@ -211,6 +212,7 @@ export default function NewSessionScreen() {
             <label>BB</label>
             <input
               type="number"
+              onFocus={(e) => e.currentTarget.select()}
               inputMode="decimal"
               value={bb}
               onChange={(e) => setBb(parseFloat(e.target.value) || 0)}
@@ -220,6 +222,7 @@ export default function NewSessionScreen() {
             <label>Ante（BB ante 可）</label>
             <input
               type="number"
+              onFocus={(e) => e.currentTarget.select()}
               inputMode="decimal"
               value={ante}
               onChange={(e) => setAnte(parseFloat(e.target.value) || 0)}
@@ -265,6 +268,7 @@ export default function NewSessionScreen() {
                 <label>％</label>
                 <input
                   type="number"
+              onFocus={(e) => e.currentTarget.select()}
                   inputMode="decimal"
                   value={rake.percent}
                   onChange={(e) =>
@@ -279,6 +283,7 @@ export default function NewSessionScreen() {
                 <label>Cap</label>
                 <input
                   type="number"
+              onFocus={(e) => e.currentTarget.select()}
                   inputMode="decimal"
                   value={rake.cap}
                   onChange={(e) =>
@@ -303,6 +308,7 @@ export default function NewSessionScreen() {
                   <label>金額</label>
                   <input
                     type="number"
+              onFocus={(e) => e.currentTarget.select()}
                     inputMode="decimal"
                     value={rake.timeAmount}
                     onChange={(e) =>
@@ -317,6 +323,7 @@ export default function NewSessionScreen() {
                   <label>間隔(分)</label>
                   <input
                     type="number"
+              onFocus={(e) => e.currentTarget.select()}
                     inputMode="numeric"
                     value={rake.timeIntervalMin}
                     onChange={(e) =>
