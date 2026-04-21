@@ -1,5 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useState } from "react";
 import TopBar from "../components/TopBar";
 import { db } from "../db/db";
 import { nextSeat } from "../utils/poker";
@@ -47,18 +48,64 @@ export default function TableScreen() {
 
   if (!session || !players) return null;
 
+  const [heroNameNeededForSeat, setHeroNameNeededForSeat] = useState<number | null>(null);
+
   const updatePlayer = async (seat: number, patch: Partial<typeof players[number]>) => {
     const p = players.find((x) => x.seat === seat);
     if (!p || p.id === undefined) return;
     await db.players.update(p.id, patch);
   };
 
-  const setHero = async (seat: number) => {
+  const applyHeroOnly = async (seat: number) => {
     for (const p of players) {
       if (p.id === undefined) continue;
       await db.players.update(p.id, { isHero: p.seat === seat });
     }
     await db.sessions.update(sessionId, { heroSeat: seat });
+  };
+
+  const applyHeroWithName = async (seat: number, name: string) => {
+    for (const p of players) {
+      if (p.id === undefined) continue;
+      if (p.seat === seat) {
+        await db.players.update(p.id, { isHero: true, name });
+      } else {
+        await db.players.update(p.id, { isHero: false });
+      }
+    }
+    await db.sessions.update(sessionId, { heroSeat: seat });
+  };
+
+  const getLastHeroName = async (): Promise<string | null> => {
+    const all = await db.sessions.orderBy("startedAt").reverse().toArray();
+    for (const s of all) {
+      if (s.id === sessionId || s.id === undefined) continue;
+      if (s.heroSeat === null) continue;
+      const heroPlayer = await db.players
+        .where({ sessionId: s.id })
+        .filter((p) => p.isHero)
+        .first();
+      if (heroPlayer && heroPlayer.name && heroPlayer.name !== "Unknown") {
+        return heroPlayer.name;
+      }
+    }
+    return null;
+  };
+
+  const setHero = async (seat: number) => {
+    const target = players.find((x) => x.seat === seat);
+    if (!target) return;
+    const needsName = target.name === "Unknown" || target.name.trim() === "";
+    if (!needsName) {
+      await applyHeroOnly(seat);
+      return;
+    }
+    const last = await getLastHeroName();
+    if (last) {
+      await applyHeroWithName(seat, last);
+    } else {
+      setHeroNameNeededForSeat(seat);
+    }
   };
 
   const startHand = async () => {
@@ -254,6 +301,87 @@ export default function TableScreen() {
             </button>
           );
         })()}
+      </div>
+
+      {heroNameNeededForSeat !== null && (
+        <HeroNamePrompt
+          seat={heroNameNeededForSeat}
+          suggestions={nameSuggestions ?? []}
+          onCancel={() => setHeroNameNeededForSeat(null)}
+          onSubmit={async (name) => {
+            await applyHeroWithName(heroNameNeededForSeat, name);
+            setHeroNameNeededForSeat(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function HeroNamePrompt({
+  seat,
+  suggestions,
+  onCancel,
+  onSubmit,
+}: {
+  seat: number;
+  suggestions: string[];
+  onCancel: () => void;
+  onSubmit: (name: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const trimmed = draft.trim();
+  const canSubmit = trimmed.length > 0 && trimmed !== "Unknown";
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-black/80 flex items-end"
+      onClick={onCancel}
+    >
+      <div
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-xl border-t border-neutral-800"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-sm text-neutral-400 mb-2">
+          S{seat} を Hero に設定 — 名前を入力（Unknown は不可）
+        </div>
+        <input
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="あなたの名前"
+        />
+        {suggestions.length > 0 && (
+          <div className="mt-3">
+            <div className="text-xs text-neutral-500 mb-1">過去のプレイヤー</div>
+            <div className="flex flex-wrap gap-2">
+              {suggestions
+                .filter((n) => n && n !== "Unknown")
+                .slice(0, 12)
+                .map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => onSubmit(n)}
+                    className="px-3 py-1 bg-neutral-800 rounded text-sm"
+                  >
+                    {n}
+                  </button>
+                ))}
+            </div>
+          </div>
+        )}
+        <div className="flex gap-2 mt-4">
+          <button onClick={onCancel} className="flex-1 py-3 bg-neutral-800 rounded">
+            キャンセル
+          </button>
+          <button
+            disabled={!canSubmit}
+            onClick={() => onSubmit(trimmed)}
+            className="flex-1 py-3 bg-felt-700 rounded font-bold disabled:opacity-40"
+          >
+            確定
+          </button>
+        </div>
       </div>
     </div>
   );
