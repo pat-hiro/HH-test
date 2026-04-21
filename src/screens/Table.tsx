@@ -62,6 +62,14 @@ export default function TableScreen() {
   };
 
   const startHand = async () => {
+    if (session.heroSeat === null) {
+      alert("Hero を選んでください");
+      return;
+    }
+    if (session.buttonSeat === null) {
+      alert("BTN を選んでください");
+      return;
+    }
     const now = Date.now();
     const active = players
       .filter((p) => !p.isAway && p.name.trim() !== "")
@@ -70,10 +78,11 @@ export default function TableScreen() {
       alert("プレイヤーが足りません（最低2人、名前未入力は空席扱い）");
       return;
     }
+    const lastFinalized = lastHand?.finalized ?? false;
     let button = session.buttonSeat;
-    if (button === null) {
-      button = active[0];
-    } else {
+    if (lastFinalized) {
+      button = nextSeat(button, session.seats, active) ?? button;
+    } else if (!active.includes(button)) {
       button = nextSeat(button, session.seats, active) ?? active[0];
     }
     const handNo = (lastHand?.handNo ?? 0) + 1;
@@ -112,8 +121,31 @@ export default function TableScreen() {
           </button>
         }
       />
-      <div className="p-3 text-sm text-neutral-400">
-        Button: S{session.buttonSeat ?? "—"} · Hero: S{session.heroSeat ?? "—"}
+      <div className="p-3 grid grid-cols-2 gap-2 text-sm">
+        <div
+          className={`rounded p-2 text-center ${
+            session.heroSeat !== null
+              ? "bg-felt-900/40 border border-felt-700"
+              : "bg-amber-900/40 border border-amber-700"
+          }`}
+        >
+          <div className="text-[10px] text-neutral-400">Hero（必須）</div>
+          <div className="font-bold">
+            {session.heroSeat !== null ? `S${session.heroSeat}` : "未設定"}
+          </div>
+        </div>
+        <div
+          className={`rounded p-2 text-center ${
+            session.buttonSeat !== null
+              ? "bg-yellow-900/40 border border-yellow-700"
+              : "bg-amber-900/40 border border-amber-700"
+          }`}
+        >
+          <div className="text-[10px] text-neutral-400">BTN（必須）</div>
+          <div className="font-bold">
+            {session.buttonSeat !== null ? `S${session.buttonSeat}` : "未設定"}
+          </div>
+        </div>
       </div>
 
       <ul className="px-3 space-y-2">
@@ -200,12 +232,28 @@ export default function TableScreen() {
       </ul>
 
       <div className="fixed bottom-0 inset-x-0 max-w-xl mx-auto p-3 bg-neutral-950/95 border-t border-neutral-800">
-        <button
-          onClick={startHand}
-          className="w-full bg-felt-700 hover:bg-felt-800 py-3 rounded font-bold text-lg"
-        >
-          次のハンドを開始 ▶
-        </button>
+        {(() => {
+          const ready =
+            session.heroSeat !== null && session.buttonSeat !== null;
+          const missing: string[] = [];
+          if (session.heroSeat === null) missing.push("Hero");
+          if (session.buttonSeat === null) missing.push("BTN");
+          return (
+            <button
+              onClick={startHand}
+              disabled={!ready}
+              className={`w-full py-3 rounded font-bold text-lg ${
+                ready
+                  ? "bg-felt-700 hover:bg-felt-800"
+                  : "bg-neutral-800 opacity-60"
+              }`}
+            >
+              {ready
+                ? "次のハンドを開始 ▶"
+                : `${missing.join(" と ")} を選んでください`}
+            </button>
+          );
+        })()}
       </div>
     </div>
   );

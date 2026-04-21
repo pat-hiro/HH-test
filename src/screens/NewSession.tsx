@@ -50,6 +50,7 @@ export default function NewSessionScreen() {
   const [autoStraddle, setAutoStraddle] = useState(false);
   const [note, setNote] = useState("");
   const [templateName, setTemplateName] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const sbManuallyEditedRef = useRef(false);
 
@@ -112,7 +113,7 @@ export default function NewSessionScreen() {
       await db.players.add({
         sessionId: id,
         seat: i,
-        name: "",
+        name: "Unknown",
         isHero: false,
         isAway: false,
         mustPostSB: false,
@@ -264,115 +265,130 @@ export default function NewSessionScreen() {
             </div>
           </div>
 
-          <div className="col-span-2 bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
-            <div className="text-sm text-neutral-300">レーキ</div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label>％</label>
-                <input
-                  type="number"
-              onFocus={(e) => e.currentTarget.select()}
-                  inputMode="decimal"
-                  value={rake.percent}
-                  onChange={(e) =>
-                    setRake({
-                      ...rake,
-                      percent: parseFloat(e.target.value) || 0,
-                    })
-                  }
-                />
-              </div>
-              <div>
-                <label>Cap</label>
-                <input
-                  type="number"
-              onFocus={(e) => e.currentTarget.select()}
-                  inputMode="decimal"
-                  value={rake.cap}
-                  onChange={(e) =>
-                    setRake({ ...rake, cap: parseFloat(e.target.value) || 0 })
-                  }
-                />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 pt-1">
-              <input
-                type="checkbox"
-                checked={rake.useTimeRake}
-                onChange={(e) =>
-                  setRake({ ...rake, useTimeRake: e.target.checked })
-                }
-              />
-              タイムレーキを使う
-            </label>
-            {rake.useTimeRake && (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label>金額</label>
-                  <input
-                    type="number"
-              onFocus={(e) => e.currentTarget.select()}
-                    inputMode="decimal"
-                    value={rake.timeAmount}
-                    onChange={(e) =>
-                      setRake({
-                        ...rake,
-                        timeAmount: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <label>間隔(分)</label>
-                  <input
-                    type="number"
-              onFocus={(e) => e.currentTarget.select()}
-                    inputMode="numeric"
-                    value={rake.timeIntervalMin}
-                    onChange={(e) =>
-                      setRake({
-                        ...rake,
-                        timeIntervalMin: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
           <div className="col-span-2">
-            <label>メモ</label>
-            <textarea
-              rows={2}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="bg-neutral-900 border border-neutral-800 rounded p-3">
-          <label>テンプレートとして保存</label>
-          <div className="flex gap-2">
-            <input
-              value={templateName}
-              onChange={(e) => setTemplateName(e.target.value)}
-              placeholder="テンプレート名"
-            />
             <button
-              onClick={saveTemplate}
-              className="px-3 bg-neutral-800 rounded whitespace-nowrap text-sm"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="w-full py-2 text-sm text-neutral-400 bg-neutral-900 border border-neutral-800 rounded"
             >
-              保存
+              {showAdvanced ? "▲ 詳細設定を閉じる" : "▼ 詳細設定（レーキ / メモ）"}
             </button>
           </div>
+
+          {showAdvanced && (
+            <>
+              <div className="col-span-2 bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
+                <div className="text-sm text-neutral-300">レーキ</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label>％</label>
+                    <input
+                      type="number"
+                      onFocus={(e) => e.currentTarget.select()}
+                      inputMode="decimal"
+                      value={rake.percent}
+                      onChange={(e) =>
+                        setRake({
+                          ...rake,
+                          percent: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label>Cap</label>
+                    <input
+                      type="number"
+                      onFocus={(e) => e.currentTarget.select()}
+                      inputMode="decimal"
+                      value={rake.cap}
+                      onChange={(e) =>
+                        setRake({ ...rake, cap: parseFloat(e.target.value) || 0 })
+                      }
+                    />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    checked={rake.useTimeRake}
+                    onChange={(e) =>
+                      setRake({ ...rake, useTimeRake: e.target.checked })
+                    }
+                  />
+                  タイムレーキを使う
+                </label>
+                {rake.useTimeRake && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label>金額</label>
+                      <input
+                        type="number"
+                        onFocus={(e) => e.currentTarget.select()}
+                        inputMode="decimal"
+                        value={rake.timeAmount}
+                        onChange={(e) =>
+                          setRake({
+                            ...rake,
+                            timeAmount: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label>間隔(分)</label>
+                      <input
+                        type="number"
+                        onFocus={(e) => e.currentTarget.select()}
+                        inputMode="numeric"
+                        value={rake.timeIntervalMin}
+                        onChange={(e) =>
+                          setRake({
+                            ...rake,
+                            timeIntervalMin: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="col-span-2">
+                <label>メモ</label>
+                <textarea
+                  rows={2}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+            </>
+          )}
         </div>
+
+        {showAdvanced && (
+          <div className="bg-neutral-900 border border-neutral-800 rounded p-3">
+            <label>テンプレートとして保存</label>
+            <div className="flex gap-2">
+              <input
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                placeholder="テンプレート名"
+              />
+              <button
+                onClick={saveTemplate}
+                className="px-3 bg-neutral-800 rounded whitespace-nowrap text-sm"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        )}
 
         <button
           onClick={create}
           className="w-full bg-felt-700 hover:bg-felt-800 py-3 rounded font-semibold"
         >
-          セッションを開始
+          テーブルへ（Hero と BTN を選択）
         </button>
       </div>
     </div>
