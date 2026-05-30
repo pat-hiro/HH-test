@@ -46,9 +46,9 @@ export default function TableScreen() {
     []
   );
 
-  if (!session || !players) return null;
-
   const [heroNameNeededForSeat, setHeroNameNeededForSeat] = useState<number | null>(null);
+
+  if (!session || !players) return null;
 
   const updatePlayer = async (seat: number, patch: Partial<typeof players[number]>) => {
     const p = players.find((x) => x.seat === seat);
