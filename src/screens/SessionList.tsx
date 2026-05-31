@@ -63,7 +63,7 @@ export default function SessionListScreen() {
 
   return (
     <div className="pb-24">
-      <TopBar title="セッション" />
+      <TopBar title="Dashboard" back="/" />
       <div className="p-3 space-y-2">
         {hasPrior && (
           <button

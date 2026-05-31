@@ -7,12 +7,14 @@ import HandResultScreen from "./screens/HandResult";
 import HandListScreen from "./screens/HandList";
 import HandPlayScreen from "./screens/HandPlay";
 import TableSetupScreen from "./screens/TableSetup";
+import EntryScreen from "./screens/Entry";
 
 function App() {
   return (
     <div className="min-h-full max-w-xl mx-auto">
       <Routes>
-        <Route path="/" element={<SessionListScreen />} />
+        <Route path="/" element={<EntryScreen />} />
+        <Route path="/dashboard" element={<SessionListScreen />} />
         <Route path="/sessions/new" element={<NewSessionScreen />} />
         <Route path="/sessions/:id/table" element={<TableScreen />} />
         <Route path="/sessions/:id/hands" element={<HandListScreen />} />

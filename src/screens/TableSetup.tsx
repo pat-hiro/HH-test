@@ -162,10 +162,16 @@ export default function TableSetupScreen() {
   return (
     <div className="min-h-screen flex flex-col">
       <div className="flex items-center px-3 py-2 border-b border-neutral-800">
-        <button onClick={() => nav("/")} className="text-emerald-400 text-sm">
+        <button onClick={() => nav("/dashboard")} className="text-emerald-400 text-sm">
           ‹ Dashboard
         </button>
         <div className="flex-1 text-center font-bold">Cash Setup</div>
+        <button
+          onClick={() => nav(`/sessions/${sessionId}/hands`)}
+          className="text-neutral-300 text-xs mr-2 px-2 py-1 bg-neutral-800 rounded"
+        >
+          履歴
+        </button>
         <button
           onClick={() => setShowEditTable(true)}
           className="text-emerald-400 text-lg px-2"
