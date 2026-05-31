@@ -6,6 +6,7 @@ import HandInputScreen from "./screens/HandInput";
 import HandResultScreen from "./screens/HandResult";
 import HandListScreen from "./screens/HandList";
 import HandPlayScreen from "./screens/HandPlay";
+import TableSetupScreen from "./screens/TableSetup";
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
         <Route path="/sessions/:id/hands/:handId/input" element={<HandInputScreen />} />
         <Route path="/sessions/:id/hands/:handId/result" element={<HandResultScreen />} />
         <Route path="/sessions/:id/hands/:handId/play" element={<HandPlayScreen />} />
+        <Route path="/sessions/:id/setup" element={<TableSetupScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

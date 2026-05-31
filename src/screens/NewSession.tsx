@@ -122,7 +122,7 @@ export default function NewSessionScreen() {
         joinedAt: now,
       });
     }
-    nav(`/sessions/${id}/table`);
+    nav(`/sessions/${id}/setup`);
   };
 
   return (

@@ -56,7 +56,7 @@ export default function SessionListScreen() {
         joinedAt: now,
       });
     }
-    nav(`/sessions/${id}/table`);
+    nav(`/sessions/${id}/setup`);
   };
 
   const hasPrior = (sessions?.length ?? 0) > 0;
@@ -104,10 +104,16 @@ export default function SessionListScreen() {
             </div>
             <div className="mt-2 flex gap-2 flex-wrap">
               <Link
-                to={`/sessions/${s.id}/table`}
-                className="px-3 py-1 bg-neutral-800 rounded text-sm"
+                to={`/sessions/${s.id}/setup`}
+                className="px-3 py-1 bg-emerald-700 rounded text-sm font-bold"
               >
-                テーブル
+                Setup
+              </Link>
+              <Link
+                to={`/sessions/${s.id}/table`}
+                className="px-3 py-1 bg-neutral-800 rounded text-xs"
+              >
+                旧UI
               </Link>
               <Link
                 to={`/sessions/${s.id}/hands`}

@@ -25,6 +25,9 @@ export default function PokerTable({
   board,
   onTapSeat,
   onTapBoardSlot,
+  aspectRatio = "3/4",
+  showBoard = true,
+  showPot = true,
 }: {
   totalSeats: number;
   seats: SeatRenderInfo[];
@@ -33,26 +36,38 @@ export default function PokerTable({
   board: (string | null)[];
   onTapSeat?: (seat: number) => void;
   onTapBoardSlot?: (index: number) => void;
+  aspectRatio?: string;
+  showBoard?: boolean;
+  showPot?: boolean;
 }): ReactNode {
   return (
-    <div className="relative w-full aspect-[3/4] max-h-[60vh]">
+    <div
+      className="relative w-full max-h-[60vh]"
+      style={{ aspectRatio }}
+    >
       <div className="absolute inset-x-2 top-[12%] bottom-[12%] rounded-[50%] bg-gradient-to-b from-felt-700 to-felt-900 border-[6px] border-neutral-900 shadow-inner" />
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-        <div className="text-[10px] text-yellow-300 uppercase tracking-wider">
-          {street}
-        </div>
-        <div className="text-sm font-bold text-yellow-200 mb-2">Pot {pot}</div>
-        <div className="flex gap-1 pointer-events-auto">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <button
-              key={i}
-              onClick={() => onTapBoardSlot?.(i)}
-              className="block"
-            >
-              <PlayingCard card={board[i] ?? null} size="sm" />
-            </button>
-          ))}
-        </div>
+        {showPot && (
+          <>
+            <div className="text-[10px] text-yellow-300 uppercase tracking-wider">
+              {street}
+            </div>
+            <div className="text-sm font-bold text-yellow-200 mb-2">Pot {pot}</div>
+          </>
+        )}
+        {showBoard && (
+          <div className="flex gap-1 pointer-events-auto">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <button
+                key={i}
+                onClick={() => onTapBoardSlot?.(i)}
+                className="block"
+              >
+                <PlayingCard card={board[i] ?? null} size="sm" />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       {seats.map((s) => {
         const { x, y } = seatXY(s.seat, totalSeats);
