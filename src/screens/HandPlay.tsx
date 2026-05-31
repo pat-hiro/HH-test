@@ -107,14 +107,15 @@ export default function HandPlayScreen() {
             });
           }
           if (p.mustPostBB) {
+            const postAmount = hand.bb + (p.postWithAnte ? hand.bb * 0.5 : 0);
             await db.actions.add({
               handId: handDbId,
               order: order++,
               street: "PF",
               seat: p.seat,
               type: "POST",
-              amount: hand.bb,
-              totalPutIn: hand.bb,
+              amount: postAmount,
+              totalPutIn: postAmount,
               isAllIn: false,
             });
           }
@@ -158,6 +159,7 @@ export default function HandPlayScreen() {
               await db.players.update(p.id, {
                 mustPostSB: false,
                 mustPostBB: false,
+                postWithAnte: false,
               });
             }
           }
@@ -335,7 +337,25 @@ export default function HandPlayScreen() {
   };
   const openAllIn = () => {
     setPending("ALL_IN");
-    setDraftAmount("");
+    if (!state || state.currentSeat === null) {
+      setDraftAmount("");
+      return;
+    }
+    const player = players.find((p) => p.seat === state.currentSeat);
+    if (!player || player.stack === undefined) {
+      setDraftAmount("");
+      return;
+    }
+    const invested = actions
+      .filter(
+        (a) =>
+          a.seat === state.currentSeat &&
+          a.type !== "FOLD" &&
+          a.type !== "CHECK"
+      )
+      .reduce((sum, a) => sum + a.amount, 0);
+    const remaining = Math.max(0, player.stack - invested);
+    setDraftAmount(String(remaining));
   };
 
   const submitPending = async () => {
@@ -354,13 +374,16 @@ export default function HandPlayScreen() {
   };
 
   const foldAll = async () => {
-    if (!state || state.currentSeat === null) return;
-    let order = (actions[actions.length - 1]?.order ?? -1) + 1;
     const surviving = hand.activeSeats.filter((s) => !folded.has(s));
+    const keepSeat =
+      heroSeat !== null && surviving.includes(heroSeat)
+        ? heroSeat
+        : state?.currentSeat ?? null;
+    if (keepSeat === null) return;
+    let order = (actions[actions.length - 1]?.order ?? -1) + 1;
     const inserts: Omit<Action, "id">[] = [];
     for (const s of surviving) {
-      if (s === state.currentSeat) continue;
-      if (s === heroSeat) continue;
+      if (s === keepSeat) continue;
       inserts.push({
         handId: handDbId,
         order: order++,

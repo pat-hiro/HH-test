@@ -7,6 +7,8 @@ const LABELS: Record<number, string[]> = {
   7: ["BTN", "SB", "BB", "UTG", "+1", "HJ", "CO"],
   8: ["BTN", "SB", "BB", "UTG", "+1", "LJ", "HJ", "CO"],
   9: ["BTN", "SB", "BB", "UTG", "+1", "+2", "LJ", "HJ", "CO"],
+  10: ["BTN", "SB", "BB", "UTG", "+1", "+2", "+3", "LJ", "HJ", "CO"],
+  11: ["BTN", "SB", "BB", "UTG", "+1", "+2", "+3", "+4", "LJ", "HJ", "CO"],
 };
 
 export function getPositionLabels(

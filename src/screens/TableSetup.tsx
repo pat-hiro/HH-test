@@ -380,6 +380,35 @@ export default function TableSetupScreen() {
           suggestions={nameSuggestions ?? []}
           onClose={() => setShowEditTable(false)}
           onUpdatePlayer={updatePlayer}
+          onAddSeat={async () => {
+            const max = players.length > 0
+              ? Math.max(...players.map((p) => p.seat))
+              : 0;
+            if (max >= 11) return;
+            await db.players.add({
+              sessionId,
+              seat: max + 1,
+              name: "Unknown",
+              isHero: false,
+              isAway: false,
+              mustPostSB: false,
+              mustPostBB: false,
+              note: "",
+              joinedAt: Date.now(),
+            });
+            await db.sessions.update(sessionId, { seats: max + 1 });
+          }}
+          onRemoveSeat={async () => {
+            if (players.length <= 2) return;
+            const last = players[players.length - 1];
+            if (last.id === undefined) return;
+            await db.players.delete(last.id);
+            await db.sessions.update(sessionId, {
+              seats: players.length - 1,
+              ...(last.isHero ? { heroSeat: null } : {}),
+              ...(last.seat === session.buttonSeat ? { buttonSeat: null } : {}),
+            });
+          }}
         />
       )}
     </div>
@@ -405,10 +434,19 @@ function PlayerEditSheet({
 }) {
   const [name, setName] = useState(player.name);
   const [stack, setStack] = useState<number | undefined>(player.stack);
+  const [isSitOut, setIsSitOut] = useState(player.isAway);
+  type PostMode = "none" | "bb" | "bb_ante";
+  const initialPost: PostMode = player.mustPostBB
+    ? player.postWithAnte
+      ? "bb_ante"
+      : "bb"
+    : "none";
+  const [postMode, setPostMode] = useState<PostMode>(initialPost);
+
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onClose}>
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800"
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-bold mb-2">S{seat} 編集</div>
@@ -447,13 +485,56 @@ function PlayerEditSheet({
               onChange={(v) => setStack(v)}
             />
           </div>
+          <div>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={isSitOut}
+                onChange={(e) => setIsSitOut(e.target.checked)}
+              />
+              Sit Out（このハンドを配らない）
+            </label>
+          </div>
+          <div>
+            <div className="text-xs text-neutral-400 mb-1">
+              Post（復帰時に次ハンドで支払う）
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => setPostMode("none")}
+                className={`py-2 rounded text-sm ${postMode === "none" ? "bg-blue-500" : "bg-neutral-800"}`}
+              >
+                なし
+              </button>
+              <button
+                onClick={() => setPostMode("bb")}
+                className={`py-2 rounded text-sm ${postMode === "bb" ? "bg-blue-500" : "bg-neutral-800"}`}
+              >
+                1BB
+              </button>
+              <button
+                onClick={() => setPostMode("bb_ante")}
+                className={`py-2 rounded text-sm ${postMode === "bb_ante" ? "bg-blue-500" : "bg-neutral-800"}`}
+              >
+                1BB + 0.5
+              </button>
+            </div>
+          </div>
         </div>
         <div className="flex gap-2 mt-4">
           <button onClick={onRemove} className="flex-1 py-3 bg-rose-500 rounded font-bold">
             空席にする
           </button>
           <button
-            onClick={() => onSave({ name: name.trim(), stack })}
+            onClick={() =>
+              onSave({
+                name: name.trim(),
+                stack,
+                isAway: isSitOut,
+                mustPostBB: postMode !== "none",
+                postWithAnte: postMode === "bb_ante",
+              })
+            }
             className="flex-1 py-3 bg-blue-500 rounded font-bold"
           >
             Confirm
@@ -652,6 +733,8 @@ function EditTableSheet({
   suggestions,
   onClose,
   onUpdatePlayer,
+  onAddSeat,
+  onRemoveSeat,
 }: {
   players: Player[];
   buttonSeat: number | null;
@@ -659,6 +742,8 @@ function EditTableSheet({
   suggestions: string[];
   onClose: () => void;
   onUpdatePlayer: (seat: number, patch: Partial<Player>) => Promise<void>;
+  onAddSeat: () => Promise<void>;
+  onRemoveSeat: () => Promise<void>;
 }) {
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onClose}>
@@ -723,6 +808,22 @@ function EditTableSheet({
         })}
         <div className="text-center text-sm mt-3">
           Current # Seats: {players.length}
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <button
+            onClick={onRemoveSeat}
+            disabled={players.length <= 2}
+            className="py-3 border border-rose-500 text-rose-500 rounded font-bold disabled:opacity-40"
+          >
+            Remove Seat
+          </button>
+          <button
+            onClick={onAddSeat}
+            disabled={players.length >= 11}
+            className="py-3 border border-blue-500 text-blue-500 rounded font-bold disabled:opacity-40"
+          >
+            Add Seat
+          </button>
         </div>
       </div>
     </div>

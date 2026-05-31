@@ -68,6 +68,7 @@ export interface Player {
   isAway: boolean;
   mustPostSB: boolean;
   mustPostBB: boolean;
+  postWithAnte?: boolean;
   stack?: number;
   note: string;
   joinedAt: number;

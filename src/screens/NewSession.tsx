@@ -246,16 +246,18 @@ export default function NewSessionScreen() {
 
           <div className="col-span-2">
             <label>Seat数</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-5 gap-1">
               {[
-                { n: 9, label: "Full ring (9)" },
+                { n: 11, label: "11" },
+                { n: 10, label: "10" },
+                { n: 9, label: "Full" },
                 { n: 6, label: "6max" },
                 { n: 2, label: "HU" },
               ].map((o) => (
                 <button
                   key={o.n}
                   onClick={() => setSeats(o.n)}
-                  className={`py-2 rounded text-sm ${
+                  className={`py-2 rounded text-xs ${
                     seats === o.n ? "bg-felt-700" : "bg-neutral-800"
                   }`}
                 >
