@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useParams } from "react-router-dom";
 import { db, DEFAULT_BET_SETTINGS, getBetSettings } from "../db/db";
@@ -171,6 +171,31 @@ export default function HandPlayScreen() {
     return computeStreetState(hand, actions, street, players);
   }, [hand, actions, street, players]);
 
+  const autoOpenedRef = useRef<Record<Street, boolean>>({
+    PF: false,
+    F: false,
+    T: false,
+    R: false,
+  });
+
+  useEffect(() => {
+    if (!hand || !actions || !players || !state) return;
+    if (boardSheet !== null) return;
+    if (pending !== null) return;
+    if (handIsOver(hand, actions)) return;
+    if (!state.done) return;
+    if (street === "PF" && !hand.board.flop && !autoOpenedRef.current.PF) {
+      autoOpenedRef.current.PF = true;
+      setBoardSheet({ start: 0 });
+    } else if (street === "F" && !hand.board.turn && !autoOpenedRef.current.F) {
+      autoOpenedRef.current.F = true;
+      setBoardSheet({ start: 3 });
+    } else if (street === "T" && !hand.board.river && !autoOpenedRef.current.T) {
+      autoOpenedRef.current.T = true;
+      setBoardSheet({ start: 4 });
+    }
+  }, [hand, actions, players, state, street, boardSheet, pending]);
+
   if (!session || !hand || !players || !actions) return null;
 
   const positions = getPositionLabels(hand.activeSeats, hand.buttonSeat);
@@ -294,7 +319,7 @@ export default function HandPlayScreen() {
         v = (state && state.currentSeat !== null ? state.toCall(state.currentSeat) : 0) * preset.multiplier;
         break;
     }
-    return Math.round(v * 100) / 100;
+    return Math.round(v);
   };
 
   const openBet = () => {
@@ -547,14 +572,6 @@ export default function HandPlayScreen() {
                     All-in
                   </button>
                 </div>
-                {(streetDone && !isOver) && (
-                  <button
-                    onClick={() => setBoardSheet({ start: street === "PF" ? 0 : street === "F" ? 3 : 4 })}
-                    className="w-full mt-2 py-3 bg-felt-700 rounded font-bold"
-                  >
-                    次のストリート (ボードカード) ▶
-                  </button>
-                )}
               </>
             )}
           </>

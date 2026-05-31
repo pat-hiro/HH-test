@@ -27,7 +27,7 @@ export default function AmountInput({
     if (basis === "pot") v = pot * mult;
     else if (basis === "unit") v = unitAmount * mult;
     else v = toCall * mult;
-    v = Math.round(v * 100) / 100;
+    v = Math.round(v);
     setValue(String(v));
   };
 
