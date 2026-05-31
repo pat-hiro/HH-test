@@ -47,6 +47,7 @@ export default function TableScreen() {
   );
 
   const [heroNameNeededForSeat, setHeroNameNeededForSeat] = useState<number | null>(null);
+  const [useNewUi, setUseNewUi] = useState(true);
 
   if (!session || !players) return null;
 
@@ -151,7 +152,7 @@ export default function TableScreen() {
       finalized: false,
     });
     await db.sessions.update(sessionId, { buttonSeat: button });
-    nav(`/sessions/${sessionId}/hands/${handId}/input`);
+    nav(`/sessions/${sessionId}/hands/${handId}/${useNewUi ? "play" : "input"}`);
   };
 
   return (
@@ -160,12 +161,20 @@ export default function TableScreen() {
         title={`${session.casino || "セッション"} · ${formatStakes(session)}`}
         back="/"
         right={
-          <button
-            onClick={() => nav(`/sessions/${sessionId}/hands`)}
-            className="text-sm px-2 py-1 bg-neutral-800 rounded"
-          >
-            履歴
-          </button>
+          <div className="flex gap-1">
+            <button
+              onClick={() => setUseNewUi((v) => !v)}
+              className={`text-xs px-2 py-1 rounded ${useNewUi ? "bg-emerald-700" : "bg-neutral-800"}`}
+            >
+              {useNewUi ? "新UI" : "旧UI"}
+            </button>
+            <button
+              onClick={() => nav(`/sessions/${sessionId}/hands`)}
+              className="text-sm px-2 py-1 bg-neutral-800 rounded"
+            >
+              履歴
+            </button>
+          </div>
         }
       />
       <div className="p-3 grid grid-cols-2 gap-2 text-sm">

@@ -128,4 +128,21 @@ export interface Hand {
   wentToShowdown: boolean;
   note: string;
   finalized: boolean;
+  heroCards?: [string, string];
+  knownCards?: { seat: number; cards: [string, string] }[];
+  stacksAtStart?: { seat: number; stack: number }[];
+}
+
+export interface BetPreset {
+  label: string;
+  multiplier: number;
+  basis: "bb" | "str" | "pot" | "call";
+}
+
+export interface BetSettings {
+  id?: number;
+  pfRaise: BetPreset[];
+  pfRaiseStraddle: BetPreset[];
+  postflopBet: BetPreset[];
+  postflopRaise: BetPreset[];
 }
