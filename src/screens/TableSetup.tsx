@@ -157,7 +157,12 @@ export default function TableSetupScreen() {
   };
 
   const heroSeatNum = session.heroSeat;
-  const heroPosition = heroSeatNum !== null ? positions.get(heroSeatNum) ?? "—" : "—";
+  const heroPosition = (() => {
+    if (heroSeatNum === null) return "—";
+    const pos = positions.get(heroSeatNum);
+    if (pos) return pos;
+    return `S${heroSeatNum}`;
+  })();
 
   return (
     <div className="min-h-screen flex flex-col">

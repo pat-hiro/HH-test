@@ -100,8 +100,10 @@ export default function PokerTable({
                 {s.position}
               </div>
             )}
-            <div className="text-[10px] font-semibold text-white">
-              {s.name || "—"}
+            <div
+              className={`text-[10px] font-semibold ${s.isHero ? "text-yellow-300" : "text-white"}`}
+            >
+              {s.isHero ? "★ " : ""}{s.name || "—"}
             </div>
             {s.stack !== undefined && (
               <div className="text-[9px] text-neutral-300">
