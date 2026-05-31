@@ -43,7 +43,7 @@ export default function BoardCardSheet({
       onClick={onCancel}
     >
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto rounded-t-2xl border-t border-neutral-800"
+        className="bg-neutral-900 w-full max-w-xl mx-auto rounded-t-2xl border-t border-neutral-800 safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-3 border-b border-neutral-800">

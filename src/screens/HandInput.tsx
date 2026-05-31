@@ -651,7 +651,7 @@ function ExposedCardDialog({
       onClick={onClose}
     >
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-xl border-t border-neutral-800"
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-xl border-t border-neutral-800 safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="font-semibold mb-2">露出カード記録</div>

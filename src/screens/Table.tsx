@@ -347,7 +347,7 @@ function HeroNamePrompt({
       onClick={onCancel}
     >
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-xl border-t border-neutral-800"
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-xl border-t border-neutral-800 safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm text-neutral-400 mb-2">

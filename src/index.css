@@ -32,3 +32,7 @@ input[type="checkbox"] {
 label {
   @apply text-sm text-neutral-300 block mb-1;
 }
+
+.safe-bottom {
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+}

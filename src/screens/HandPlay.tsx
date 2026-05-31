@@ -725,7 +725,7 @@ function BetSettingsSheet({
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-end" onClick={onClose}>
       <div
-        className="bg-neutral-950 w-full max-w-xl mx-auto p-3 rounded-t-2xl border-t border-neutral-800 max-h-[90vh] overflow-y-auto"
+        className="bg-neutral-950 w-full max-w-xl mx-auto p-3 rounded-t-2xl border-t border-neutral-800 max-h-[85vh] overflow-y-auto safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-bold mb-3">ベット/レイズプリセット編集</div>

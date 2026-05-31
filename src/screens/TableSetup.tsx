@@ -446,7 +446,7 @@ function PlayerEditSheet({
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onClose}>
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 max-h-[90vh] overflow-y-auto"
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 max-h-[85vh] overflow-y-auto safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-bold mb-2">S{seat} 編集</div>
@@ -563,7 +563,7 @@ function BlindsSheet({
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onCancel}>
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800"
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-bold text-center mb-3">Cash Game Stakes</div>
@@ -643,28 +643,40 @@ function HeroPositionSheet({
   onPick: (seat: number) => void;
 }) {
   const positions = getPositionLabels(activeSeats, buttonSeat);
-  const entries = Array.from(positions.entries());
+  const sortedSeats = [...activeSeats].sort((a, b) => a - b);
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onCancel}>
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800"
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 pb-8 rounded-t-2xl border-t border-neutral-800 max-h-[80vh] overflow-y-auto"
+        style={{ paddingBottom: "max(2rem, env(safe-area-inset-bottom))" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
           <div className="text-sm font-bold">Select Hero Position</div>
           <button onClick={onCancel} className="text-neutral-400">✕</button>
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          {entries.map(([seat, label]) => (
-            <button
-              key={seat}
-              onClick={() => onPick(seat)}
-              className={`py-4 rounded font-bold text-sm ${currentHero === seat ? "bg-blue-500" : "bg-neutral-800"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {buttonSeat === null && (
+          <div className="text-xs text-amber-400 mb-2">
+            BTN 未設定 — 席番号から選択。後で BTN を割り当てるとポジション表示が自動で更新されます
+          </div>
+        )}
+        {sortedSeats.length === 0 ? (
+          <div className="text-sm text-neutral-400 py-4 text-center">
+            着席プレイヤーがいません。先に席に名前を入れてください。
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {sortedSeats.map((seat) => (
+              <button
+                key={seat}
+                onClick={() => onPick(seat)}
+                className={`py-4 rounded font-bold text-sm ${currentHero === seat ? "bg-blue-500" : "bg-neutral-800"}`}
+              >
+                {positions.get(seat) ?? `S${seat}`}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -684,7 +696,7 @@ function AdjustAllSheet({
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onCancel}>
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800"
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-bold mb-2">Adjust All Stacks</div>
@@ -748,7 +760,7 @@ function EditTableSheet({
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onClose}>
       <div
-        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 max-h-[90vh] overflow-y-auto"
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 max-h-[85vh] overflow-y-auto safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-2">

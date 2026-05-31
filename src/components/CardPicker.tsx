@@ -46,7 +46,7 @@ export default function CardPicker({
           onClick={() => setOpen(false)}
         >
           <div
-            className="bg-neutral-900 w-full p-3 rounded-t-xl border-t border-neutral-800"
+            className="bg-neutral-900 w-full p-3 rounded-t-xl border-t border-neutral-800 safe-bottom"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-3">
