@@ -167,13 +167,16 @@ export default function Setup() {
     seat: p.seat,
     position: positions.get(p.seat) ?? "",
     name: p.name,
-    stack: p.stack,
+    // empty chairs show no stack — just the seat number + ＋
+    stack: p.name.trim() === "" ? null : p.stack,
     isHero: p.isHero,
     isBTN: p.seat === session.buttonSeat,
     isCurrent: false,
     isFolded: p.isAway,
     isAllIn: false,
     cards: null,
+    // a chair with no name is an empty seat (＋ to add a player)
+    empty: p.name.trim() === "",
     liveBet:
       p.seat === previewSb
         ? session.sb
@@ -398,8 +401,9 @@ export default function Setup() {
           pot={previewPot}
           streetLabel=""
           board={[null, null, null, null, null]}
-          aspectRatio="5/4"
+          aspectRatio="16/11"
           onTapSeat={onTapSeat}
+          onTapEmptySeat={onTapSeat}
           bb={session.bb}
         />
         {assignBtnMode && (

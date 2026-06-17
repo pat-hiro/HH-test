@@ -16,6 +16,7 @@ import BetSizeSheet from "../components/BetSizeSheet";
 import CardPickerSheet from "../components/CardPickerSheet";
 import NoteSheet from "../components/NoteSheet";
 import EventSheet from "../components/EventSheet";
+import { PlayerEditSheet } from "../components/SetupSheets";
 import { positionLabels } from "../positions";
 import { fmtChips } from "../fmt";
 
@@ -115,6 +116,12 @@ export default function Hand() {
     () => (handId ? Events.forHand(handId) : []),
     [handId]
   );
+  // Live session roster — lets the table show empty chairs (＋) and players who
+  // sit down mid-hand, even though the engine only knows the hand snapshot.
+  const roster = useLiveQuery(
+    () => (sessionId ? Players.forSession(sessionId) : []),
+    [sessionId]
+  );
   const { hand, setup, state } = useEngineState(handId);
 
   const [pending, setPending] = useState<null | "BET" | "RAISE" | "ALL_IN">(null);
@@ -124,6 +131,8 @@ export default function Hand() {
   const [noteOpen, setNoteOpen] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
   const [knownCardsSeat, setKnownCardsSeat] = useState<number | null>(null);
+  // Seat number whose "seat a new player" sheet is open (empty/waiting chair).
+  const [seatingSeat, setSeatingSeat] = useState<number | null>(null);
 
   // Serializes all action writes. Two rapid taps must not (a) collide on the
   // `order` key or (b) compute their move against a stale, pre-first-tap state.
@@ -288,24 +297,55 @@ export default function Hand() {
     }
   }
 
-  const seatVMs: SeatVM[] = hand.seats.map((s) => ({
-    seat: s.seat,
-    position: positions.get(s.seat) ?? "",
-    name: s.name,
-    stack: s.startStack - (state.spentTotal[s.seat] ?? 0),
-    isHero: s.seat === heroSeat,
-    isBTN: s.seat === hand.buttonSeat,
-    isCurrent: s.seat === state.currentSeat,
-    isFolded: foldedSet.has(s.seat),
-    isAllIn: allInSet.has(s.seat),
-    cards:
-      s.seat === heroSeat && hand.heroCards
-        ? hand.heroCards
-        : knownCards[s.seat] ?? null,
-    liveBet: state.liveThisStreet[s.seat] ?? 0,
-    blind: state.street === "PF" ? forcedKindBySeat.get(s.seat) ?? null : null,
-    ante: state.street === "PF" ? anteBySeat.get(s.seat) ?? 0 : 0,
-  }));
+  // Render EVERY chair 1..seatCount, not just the ones in this hand:
+  //  - in the hand snapshot → a normal, playable seat
+  //  - a session player who isn't in this hand (sat down mid-hand) → 待機
+  //  - nobody → an empty chair with a ＋ to seat a new player
+  const rosterBySeat = new Map((roster ?? []).map((p) => [p.seat, p]));
+  const blankVM = (seat: number): SeatVM => ({
+    seat,
+    position: "",
+    name: "",
+    stack: null,
+    isHero: false,
+    isBTN: false,
+    isCurrent: false,
+    isFolded: false,
+    isAllIn: false,
+    cards: null,
+    liveBet: 0,
+  });
+  const seatVMs: SeatVM[] = [];
+  for (let seat = 1; seat <= session.seatCount; seat++) {
+    const snap = hand.seats.find((s) => s.seat === seat);
+    if (snap) {
+      seatVMs.push({
+        seat,
+        position: positions.get(seat) ?? "",
+        name: snap.name,
+        stack: snap.startStack - (state.spentTotal[seat] ?? 0),
+        isHero: seat === heroSeat,
+        isBTN: seat === hand.buttonSeat,
+        isCurrent: seat === state.currentSeat,
+        isFolded: foldedSet.has(seat),
+        isAllIn: allInSet.has(seat),
+        cards:
+          seat === heroSeat && hand.heroCards
+            ? hand.heroCards
+            : knownCards[seat] ?? null,
+        liveBet: state.liveThisStreet[seat] ?? 0,
+        blind: state.street === "PF" ? forcedKindBySeat.get(seat) ?? null : null,
+        ante: state.street === "PF" ? anteBySeat.get(seat) ?? 0 : 0,
+      });
+      continue;
+    }
+    const rp = rosterBySeat.get(seat);
+    if (rp && rp.name.trim() !== "" && !rp.isAway) {
+      seatVMs.push({ ...blankVM(seat), name: rp.name, stack: rp.stack, waiting: true });
+    } else {
+      seatVMs.push({ ...blankVM(seat), empty: true });
+    }
+  }
 
   // ----- mutations ----------------------------------------------------------
 
@@ -889,16 +929,17 @@ export default function Hand() {
           streetLabel={streetTitle(state.street)}
           board={board}
           onTapSeat={onTapSeat}
+          onTapEmptySeat={(seat) => setSeatingSeat(seat)}
           onTapBoardSlot={onTapBoardSlot}
           bb={hand.bb}
         />
       </div>
 
       {/* Hero cards + note row — available throughout the hand */}
-      <div className="px-3 pt-2 flex gap-2">
+      <div className="px-2 pt-1.5 flex gap-2">
         <button
           onClick={() => setHeroCardsOpen(true)}
-          className="flex-1 py-2 bg-neutral-800 rounded text-sm"
+          className="flex-1 py-1.5 bg-neutral-800 rounded text-sm"
         >
           Hero:{" "}
           <span className="font-mono">
@@ -907,20 +948,20 @@ export default function Hand() {
         </button>
         <button
           onClick={() => setNoteOpen(true)}
-          className={`flex-1 py-2 rounded text-sm ${hand.note ? "bg-blue-900/50 border border-blue-700" : "bg-neutral-800"}`}
+          className={`flex-1 py-1.5 rounded text-sm ${hand.note ? "bg-blue-900/50 border border-blue-700" : "bg-neutral-800"}`}
         >
           ✎ メモ{hand.note ? " ●" : ""}
         </button>
         <button
           onClick={() => setEventOpen(true)}
-          className={`flex-1 py-2 rounded text-sm ${(handEvents?.length ?? 0) > 0 ? "bg-purple-900/50 border border-purple-700" : "bg-neutral-800"}`}
+          className={`flex-1 py-1.5 rounded text-sm ${(handEvents?.length ?? 0) > 0 ? "bg-purple-900/50 border border-purple-700" : "bg-neutral-800"}`}
         >
           ⚑ Event
           {(handEvents?.length ?? 0) > 0 ? ` ${handEvents!.length}` : ""}
         </button>
       </div>
 
-      <div className="flex-1 p-3 space-y-2">
+      <div className="flex-1 p-2 space-y-1.5">
         {showResult ? (
           <div className="space-y-3">
             <div className="bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
@@ -1131,27 +1172,23 @@ export default function Hand() {
           </div>
         ) : (
           <>
-            <div className="flex gap-2 items-center">
-              <button onClick={() => nav(`/sessions/${session.id}/setup`)} className="px-4 py-2 bg-neutral-700 rounded text-sm">
-                Back
-              </button>
-              <div className="ml-auto flex gap-2">
+            {(state.street === "PF" ||
+              (state.toCall === 0 && state.currentSeat !== null)) && (
+              <div className="flex justify-end">
                 {state.street === "PF" ? (
                   <button onClick={foldAll} className="px-4 py-2 bg-rose-500 rounded text-sm font-bold">
                     Fold All
                   </button>
                 ) : (
-                  state.toCall === 0 && (
-                    <button
-                      onClick={checkThru}
-                      className="px-4 py-2 bg-amber-600 rounded text-sm font-bold"
-                    >
-                      Check Thru
-                    </button>
-                  )
+                  <button
+                    onClick={checkThru}
+                    className="px-4 py-2 bg-amber-600 rounded text-sm font-bold"
+                  >
+                    Check Thru
+                  </button>
                 )}
               </div>
-            </div>
+            )}
 
             {canCall && (
               <button onClick={onCall} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
@@ -1268,6 +1305,59 @@ export default function Hand() {
           onSave={saveNote}
         />
       )}
+
+      {seatingSeat !== null && (() => {
+        // Seat a new player mid-session into an empty/waiting chair. This edits
+        // the SESSION roster only — the current hand keeps its snapshot, so the
+        // new player joins from the NEXT hand. Reuses the Setup player sheet.
+        const existing = (roster ?? []).find((p) => p.seat === seatingSeat);
+        const placeholder = {
+          id: "",
+          sessionId: session.id,
+          seat: seatingSeat,
+          name: "",
+          isHero: false,
+          isAway: false,
+          mustPostBB: false,
+          postWithAnte: false,
+          stack: null as number | null,
+          note: "",
+          updatedAt: 0,
+          deletedAt: null,
+        };
+        return (
+          <PlayerEditSheet
+            seat={seatingSeat}
+            player={existing ?? placeholder}
+            bb={hand.bb}
+            ante={hand.ante}
+            suggestions={[]}
+            onClose={() => setSeatingSeat(null)}
+            onSave={async (patch) => {
+              if (existing) {
+                await Players.update(existing.id, { ...patch, isAway: false });
+              } else {
+                await Players.create({
+                  sessionId: session.id,
+                  seat: seatingSeat,
+                  name: patch.name ?? "",
+                  isHero: false,
+                  isAway: false,
+                  mustPostBB: patch.mustPostBB ?? false,
+                  postWithAnte: patch.postWithAnte ?? false,
+                  stack: patch.stack ?? null,
+                  note: "",
+                });
+              }
+              setSeatingSeat(null);
+            }}
+            onSitOut={async () => {
+              if (existing) await Players.update(existing.id, { isAway: !existing.isAway });
+              setSeatingSeat(null);
+            }}
+          />
+        );
+      })()}
 
       {eventOpen && handId && (
         <EventSheet

@@ -36,13 +36,16 @@ export function seatXY(seat: number, total: number): { x: number; y: number } {
   // k) is at angle -90° + k * (360 / (N+1)).
   const slots = total + 1;
   const angle = (seat * (360 / slots) - 90) * (Math.PI / 180);
+  // Wider X radius + flatter Y radius spreads the seats along the two long
+  // sides of a landscape "racetrack" table, the way a real cardroom table
+  // reads, instead of a tall portrait oval.
   return {
-    x: 50 + 42 * Math.cos(angle),
-    y: 50 + 38 * Math.sin(angle),
+    x: 50 + 44 * Math.cos(angle),
+    y: 50 + 37 * Math.sin(angle),
   };
 }
 
-/** Position of the dealer marker — always top centre of the oval. */
+/** Position of the dealer marker — always top centre of the racetrack. */
 export function dealerXY(): { x: number; y: number } {
-  return { x: 50, y: 50 - 38 };
+  return { x: 50, y: 50 - 37 };
 }
