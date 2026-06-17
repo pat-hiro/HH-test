@@ -192,8 +192,8 @@ export default function Setup() {
   return (
     <div className="min-h-screen flex flex-col">
       <div className="flex items-center px-3 py-2 border-b border-neutral-800">
-        <button onClick={() => nav("/review")} className="text-emerald-400 text-sm">
-          履歴
+        <button onClick={() => nav("/settings")} className="text-neutral-300 text-lg px-2" title="Settings">
+          ⚙
         </button>
         <div className="flex-1 text-center font-bold">Cash Setup</div>
         <button

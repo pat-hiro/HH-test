@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../data/db";
-import { Actions, Hands, Players, Sessions } from "../../data/repo";
+import { Actions, Hands, Players, Sessions, Settings } from "../../data/repo";
 import { makeSetup, nextActive } from "../../engine/setup";
 import { computeState, moveToAction } from "../../engine/reducer";
 import type { Move } from "../../engine/reducer";
@@ -11,6 +11,7 @@ import type { Action as StoredAction } from "../../data/types";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
 import BoardCardSheet from "../components/BoardCardSheet";
+import BetSizeSheet from "../components/BetSizeSheet";
 import { positionLabels } from "../positions";
 
 // ----- helpers --------------------------------------------------------------
@@ -102,10 +103,11 @@ export default function Hand() {
     () => (sessionId ? db.sessions.get(sessionId) : undefined),
     [sessionId]
   );
+  const settings = useLiveQuery(() => Settings.get(), []);
   const { hand, stored, setup, engineActions, state } = useEngineState(handId);
 
   const [pending, setPending] = useState<null | "BET" | "RAISE" | "ALL_IN">(null);
-  const [draftAmount, setDraftAmount] = useState("");
+  const [allInDraft, setAllInDraft] = useState<number>(0);
   const [boardSheetSlot, setBoardSheetSlot] = useState<number | null>(null);
 
   // auto-open board picker when a street closes and the next street's cards
@@ -131,7 +133,7 @@ export default function Hand() {
     }
   }, [hand, state, boardSheetSlot, pending]);
 
-  if (!session || !hand || !setup || !state) return null;
+  if (!session || !hand || !setup || !state || !settings) return null;
 
   // ----- VM (read-only) ------------------------------------------------------
 
@@ -247,36 +249,65 @@ export default function Hand() {
   const onCall = () =>
     state.currentSeat !== null && persist({ seat: state.currentSeat, type: "call" });
 
-  const openBet = () => {
-    setPending("BET");
-    setDraftAmount(String(hand.bb));
-  };
-  const openRaise = () => {
-    setPending("RAISE");
-    setDraftAmount(String(state.minRaiseTo));
-  };
+  const openBet = () => setPending("BET");
+  const openRaise = () => setPending("RAISE");
   const openAllIn = () => {
     if (state.currentSeat === null) return;
     const seat = hand.seats.find((s) => s.seat === state.currentSeat);
     const remaining = seat
       ? Math.max(0, seat.startStack - (state.spentTotal[seat.seat] ?? 0))
       : 0;
+    setAllInDraft(remaining);
     setPending("ALL_IN");
-    setDraftAmount(String(remaining));
   };
 
-  const submitPending = async () => {
-    if (state.currentSeat === null) return;
-    const amt = parseFloat(draftAmount) || 0;
+  const submitAmount = async (amt: number) => {
+    if (state.currentSeat === null || !handId) return;
     if (pending === "BET") {
       await persist({ seat: state.currentSeat, type: "bet", to: amt });
     } else if (pending === "RAISE") {
       await persist({ seat: state.currentSeat, type: "raise", to: amt });
     } else if (pending === "ALL_IN") {
-      await persist({ seat: state.currentSeat, type: "allin" });
+      // honor the user's amount (lets them correct an outdated snapshot stack)
+      await Actions.create({
+        handId,
+        order: stored.length,
+        street: state.street,
+        seat: state.currentSeat,
+        type: "allin",
+        amount: amt,
+        isAllIn: true,
+      });
     }
     setPending(null);
-    setDraftAmount("");
+  };
+
+  // straddle amount in the current hand (if any) — needed for "str"-basis presets
+  const handStraddleAmount = setup.forced
+    .filter((f) => f.kind === "straddle")
+    .reduce((max, f) => Math.max(max, f.amount), 0);
+
+  const presetCtx = {
+    bb: hand.bb,
+    pot: state.pot,
+    toCall: state.toCall,
+    straddleAmount: handStraddleAmount,
+  };
+
+  const presetsForPending = (): typeof settings.pfRaise => {
+    if (pending === "BET") return settings.postflopBet;
+    if (pending === "RAISE") {
+      if (state.street === "PF") {
+        return handStraddleAmount > 0 ? settings.pfRaiseStraddle : settings.pfRaise;
+      }
+      return settings.postflopRaise;
+    }
+    return [];
+  };
+  const minForPending = (): number => {
+    if (pending === "BET") return hand.bb;
+    if (pending === "RAISE") return state.minRaiseTo;
+    return 0;
   };
 
   const undo = async () => {
@@ -385,6 +416,7 @@ export default function Hand() {
         <button onClick={() => nav(`/sessions/${session.id}/setup`)} className="text-emerald-400 text-lg">‹</button>
         <button onClick={undo} className="ml-3 text-rose-400 text-lg">↻</button>
         <div className="flex-1 text-center font-bold tracking-wider">{streetTitle(state.street)}</div>
+        <button onClick={() => nav("/settings")} className="text-neutral-300 text-sm px-2">⚙</button>
         <div className="text-xs text-neutral-500">#{hand.handNo}</div>
       </div>
 
@@ -420,71 +452,42 @@ export default function Hand() {
               </div>
             </div>
 
-            {pending ? (
-              <div className="space-y-2">
-                <div className="flex gap-2 items-center">
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    onFocus={(e) => e.currentTarget.select()}
-                    value={draftAmount}
-                    onChange={(e) => setDraftAmount(e.target.value)}
-                    className="flex-1 text-2xl font-mono"
-                  />
-                  <button
-                    onClick={submitPending}
-                    className="px-6 py-3 bg-emerald-600 rounded font-bold"
-                  >
-                    {pending === "RAISE" ? "Raise" : pending === "BET" ? "Bet" : "All-in"}
-                  </button>
-                  <button
-                    onClick={() => { setPending(null); setDraftAmount(""); }}
-                    className="px-3 py-3 bg-rose-500 rounded"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                {canCall && (
-                  <button onClick={onCall} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
-                    Call {state.toCall}
-                  </button>
-                )}
-                {canCheck && state.currentSeat !== null && (
-                  <button onClick={onCheck} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
-                    Check
-                  </button>
-                )}
-                {canRaise && (
-                  <button onClick={openRaise} className="w-full py-4 bg-emerald-600 rounded font-bold text-lg">
-                    Raise
-                  </button>
-                )}
-                {canBet && (
-                  <button onClick={openBet} className="w-full py-4 bg-emerald-600 rounded font-bold text-lg">
-                    Bet
-                  </button>
-                )}
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={onFold}
-                    disabled={state.currentSeat === null}
-                    className="py-4 bg-rose-500 rounded font-bold text-lg disabled:opacity-40"
-                  >
-                    Fold
-                  </button>
-                  <button
-                    onClick={openAllIn}
-                    disabled={state.currentSeat === null}
-                    className="py-4 bg-amber-500 rounded font-bold text-lg disabled:opacity-40"
-                  >
-                    All-in
-                  </button>
-                </div>
-              </>
+            {canCall && (
+              <button onClick={onCall} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
+                Call {state.toCall}
+              </button>
             )}
+            {canCheck && state.currentSeat !== null && (
+              <button onClick={onCheck} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
+                Check
+              </button>
+            )}
+            {canRaise && (
+              <button onClick={openRaise} className="w-full py-4 bg-emerald-600 rounded font-bold text-lg">
+                Raise
+              </button>
+            )}
+            {canBet && (
+              <button onClick={openBet} className="w-full py-4 bg-emerald-600 rounded font-bold text-lg">
+                Bet
+              </button>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={onFold}
+                disabled={state.currentSeat === null}
+                className="py-4 bg-rose-500 rounded font-bold text-lg disabled:opacity-40"
+              >
+                Fold
+              </button>
+              <button
+                onClick={openAllIn}
+                disabled={state.currentSeat === null}
+                className="py-4 bg-amber-500 rounded font-bold text-lg disabled:opacity-40"
+              >
+                All-in
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -498,6 +501,18 @@ export default function Hand() {
           onSubmit={submitBoard}
           onCancel={() => setBoardSheetSlot(null)}
           onClear={clearBoard}
+        />
+      )}
+
+      {pending && (
+        <BetSizeSheet
+          kind={pending === "BET" ? "bet" : pending === "RAISE" ? "raise" : "allin"}
+          presets={presetsForPending()}
+          ctx={presetCtx}
+          min={pending === "ALL_IN" ? 1 : minForPending()}
+          initial={pending === "ALL_IN" ? allInDraft : undefined}
+          onCancel={() => setPending(null)}
+          onSubmit={submitAmount}
         />
       )}
     </div>

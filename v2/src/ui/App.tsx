@@ -5,6 +5,7 @@ import Setup from "./screens/Setup";
 import Hand from "./screens/Hand";
 import Review from "./screens/Review";
 import Bankroll from "./screens/Bankroll";
+import SettingsScreen from "./screens/Settings";
 import TabBar from "./components/TabBar";
 import { db } from "../data/db";
 
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/sessions/:sessionId/hands/:handId" element={<WithTabBar><Hand /></WithTabBar>} />
         <Route path="/review" element={<WithTabBar><Review /></WithTabBar>} />
         <Route path="/bankroll" element={<WithTabBar><Bankroll /></WithTabBar>} />
+        <Route path="/settings" element={<WithTabBar><SettingsScreen /></WithTabBar>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
