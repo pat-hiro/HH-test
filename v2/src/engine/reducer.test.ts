@@ -169,3 +169,79 @@ describe("a normal multiway street resolves correctly", () => {
     expect(final.street).toBe("F");
   });
 });
+
+describe("v2 regression: action moves clockwise from the most recent actor", () => {
+  it("right after UTG limps + UTG+1 raises, action is on UTG+2 — NOT the limper", () => {
+    const setup = base(); // 9-max, BTN=1, SB=2, BB=3, UTG=4
+    const { states } = simulate(setup, [
+      { seat: 4, type: "call" }, // UTG limps
+      { seat: 5, type: "raise", to: 6 }, // UTG+1 raises
+    ]);
+    const after = states[states.length - 1];
+    expect(after.currentSeat).toBe(6); // UTG+2, the next seat after the raiser
+    expect(after.toCall).toBe(6);
+    expect(after.streetComplete).toBe(false);
+  });
+
+  it("right after the BB closes, action goes back to the LIMPER (not skipped to flop)", () => {
+    const setup = base(); // 9-max, BTN seat 1 → SB=2, BB=3, UTG=4
+    // UTG(4) limps, UTG+1(5) raises to 6
+    let st = computeState(setup, []);
+    // sanity
+    expect(st.currentSeat).toBe(4);
+
+    const { states } = simulate(setup, [
+      { seat: 4, type: "call" }, // UTG limps (call 2)
+      { seat: 5, type: "raise", to: 6 }, // UTG+1 raises to 6
+      { seat: 6, type: "fold" },
+      { seat: 7, type: "fold" },
+      { seat: 8, type: "fold" },
+      { seat: 9, type: "fold" },
+      { seat: 1, type: "call" }, // BTN calls 6
+      { seat: 2, type: "fold" }, // SB folds
+      { seat: 3, type: "call" }, // BB calls 6
+    ]);
+    const afterBbCall = states[states.length - 1];
+    // The limper at seat 4 has live = 2 (limp), currentBet = 6.
+    // They MUST get to act again: call 4 more or fold or 3-bet.
+    expect(afterBbCall.currentSeat).toBe(4);
+    expect(afterBbCall.streetComplete).toBe(false);
+    expect(afterBbCall.toCall).toBe(4);
+  });
+
+  it("BB has the standard option when PF is unraised (limped pot)", () => {
+    const setup = base();
+    const { states } = simulate(setup, [
+      { seat: 4, type: "call" }, // UTG limps
+      { seat: 5, type: "fold" },
+      { seat: 6, type: "fold" },
+      { seat: 7, type: "fold" },
+      { seat: 8, type: "fold" },
+      { seat: 9, type: "fold" },
+      { seat: 1, type: "fold" }, // BTN folds
+      { seat: 2, type: "call" }, // SB completes
+    ]);
+    const afterSb = states[states.length - 1];
+    // BB still has the option to check or raise
+    expect(afterSb.currentSeat).toBe(3);
+    expect(afterSb.toCall).toBe(0);
+  });
+
+  it("after the limper folds, the street completes and we advance to flop", () => {
+    const setup = base();
+    const { final } = simulate(setup, [
+      { seat: 4, type: "call" },
+      { seat: 5, type: "raise", to: 6 },
+      { seat: 6, type: "fold" },
+      { seat: 7, type: "fold" },
+      { seat: 8, type: "fold" },
+      { seat: 9, type: "fold" },
+      { seat: 1, type: "call" },
+      { seat: 2, type: "fold" },
+      { seat: 3, type: "call" },
+      { seat: 4, type: "fold" }, // limper folds to the raise
+    ]);
+    expect(final.street).toBe("F");
+    expect(final.streetComplete).toBe(false); // postflop: someone is to act on the flop
+  });
+});

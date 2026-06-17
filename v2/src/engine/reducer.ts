@@ -129,10 +129,15 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
     // seats that took a voluntary action this street (blind posting is NOT voluntary)
     const acted = new Set<number>();
     let lastAggressor: number | null = null;
+    /** seat of the most recently logged voluntary action this street; used to
+     *  decide where the next-to-act scan starts (action moves clockwise from
+     *  the most recent actor, NOT from firstToAct). */
+    let lastActor: number | null = null;
 
     const streetActions = actions.filter((a) => a.street === street);
     for (const a of streetActions) {
       acted.add(a.seat);
+      lastActor = a.seat;
       if (a.type === "fold") {
         folded.add(a.seat);
         continue;
@@ -180,10 +185,21 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
     const canAct = inHand.filter((s) => !allIn.has(s));
 
     // find the seat that still needs to act
+    //   - if nobody has acted yet this street, start from firstToAct
+    //   - otherwise, start from the seat AFTER the most recent actor so that
+    //     action moves clockwise around the table. This is the rule that was
+    //     missing in v2: without it, after a raise the scan would pick up the
+    //     limper who has to call again BEFORE the seats between the raiser
+    //     and the limper — i.e., the limper got the action instead of the
+    //     next seat clockwise from the raiser.
     const fta = firstToAct(setup, street, inHand);
     let currentSeat: number | null = null;
-    if (canAct.length >= 2 && fta !== null) {
-      let scan: number | null = fta;
+    const scanStart: number | null =
+      lastActor !== null
+        ? nextActive(lastActor, setup.seatCount, canAct)
+        : fta;
+    if (canAct.length >= 2 && scanStart !== null) {
+      let scan: number | null = scanStart;
       for (let i = 0; i < setup.seatCount + 1 && scan !== null; i++) {
         const s = scan;
         const needsToAct =
@@ -193,7 +209,7 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
           break;
         }
         scan = nextActive(s, setup.seatCount, canAct);
-        if (scan === fta) break; // full loop, nobody needs to act
+        if (scan === scanStart) break; // full loop, nobody needs to act
       }
     }
 

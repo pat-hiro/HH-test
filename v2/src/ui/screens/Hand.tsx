@@ -121,28 +121,32 @@ export default function Hand() {
   const [shares, setShares] = useState<Record<number, string>>({});
   const [knownCards, setKnownCards] = useState<Record<number, [string, string]>>({});
 
-  // auto-open board picker when a street closes and the next street's cards
-  // haven't been entered yet. Tracked by a ref so cancel doesn't loop.
-  const autoOpenedRef = useRef<Record<Street, boolean>>({
-    PF: false, F: false, T: false, R: false,
-  });
-  useEffect(() => {
-    if (!hand || !state) return;
-    if (boardSheetSlot !== null || pending !== null) return;
-    if (state.handComplete) return;
-    if (state.streetComplete) {
-      if (state.street === "PF" && !hand.board.flop && !autoOpenedRef.current.PF) {
-        autoOpenedRef.current.PF = true;
-        setBoardSheetSlot(0);
-      } else if (state.street === "F" && !hand.board.turn && !autoOpenedRef.current.F) {
-        autoOpenedRef.current.F = true;
-        setBoardSheetSlot(3);
-      } else if (state.street === "T" && !hand.board.river && !autoOpenedRef.current.T) {
-        autoOpenedRef.current.T = true;
-        setBoardSheetSlot(4);
-      }
+  // Determine what board input is required to enter the current engine street.
+  // Returns the slots that MUST be filled before action can resume, or null if
+  // the board is already adequate for the engine's current street.
+  const boardRequirement = (() => {
+    if (!hand || !state) return null;
+    if (state.handComplete) return null;
+    if (state.street === "F" && !hand.board.flop) {
+      return { slots: [0, 1, 2], startSlot: 0 };
     }
-  }, [hand, state, boardSheetSlot, pending]);
+    if (state.street === "T" && !hand.board.turn) {
+      return { slots: [3], startSlot: 3 };
+    }
+    if (state.street === "R" && !hand.board.river) {
+      return { slots: [4], startSlot: 4 };
+    }
+    return null;
+  })();
+
+  // auto-open the board picker the moment the engine advances past the board,
+  // and never auto-dismiss it: input is required for the new street.
+  useEffect(() => {
+    if (!boardRequirement) return;
+    if (boardSheetSlot !== null) return;
+    if (pending !== null) return;
+    setBoardSheetSlot(boardRequirement.startSlot);
+  }, [boardRequirement, boardSheetSlot, pending]);
 
   // seed the result-entry panel once the hand completes (reset if undone back)
   useEffect(() => {
@@ -522,10 +526,15 @@ export default function Hand() {
 
   // ----- render -------------------------------------------------------------
 
-  const canCheck = state.toCall === 0;
-  const canCall = state.toCall > 0;
-  const canBet = state.currentBet === 0 && state.currentSeat !== null;
-  const canRaise = state.currentBet > 0 && state.currentSeat !== null && !canCheck;
+  const boardBlocked = boardRequirement !== null;
+  const canCheck = state.toCall === 0 && !boardBlocked;
+  const canCall = state.toCall > 0 && !boardBlocked;
+  const canBet =
+    state.currentBet === 0 && state.currentSeat !== null && !boardBlocked;
+  // BB option / facing a raise — both allow Raise. Show alongside Check when
+  // there's a live bet but I owe nothing (e.g., BB in a limped pot).
+  const canRaise =
+    state.currentBet > 0 && state.currentSeat !== null && !boardBlocked;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -702,19 +711,24 @@ export default function Hand() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={onFold}
-                disabled={state.currentSeat === null}
+                disabled={state.currentSeat === null || boardBlocked}
                 className="py-4 bg-rose-500 rounded font-bold text-lg disabled:opacity-40"
               >
                 Fold
               </button>
               <button
                 onClick={openAllIn}
-                disabled={state.currentSeat === null}
+                disabled={state.currentSeat === null || boardBlocked}
                 className="py-4 bg-amber-500 rounded font-bold text-lg disabled:opacity-40"
               >
                 All-in
               </button>
             </div>
+            {boardBlocked && (
+              <div className="text-xs text-rose-300 text-center pt-2">
+                次のストリートに進むにはボードカードを入力してください
+              </div>
+            )}
           </>
         )}
       </div>
@@ -725,8 +739,15 @@ export default function Hand() {
           startSlot={boardSheetSlot}
           hero={hand.heroCards}
           exclude={board.filter((c): c is string => !!c)}
+          requiredSlots={boardRequirement?.slots}
+          blocking={boardRequirement !== null}
           onSubmit={submitBoard}
-          onCancel={() => setBoardSheetSlot(null)}
+          onCancel={() => {
+            // The sheet can only be dismissed when the board isn't required
+            // for the engine's current street. Otherwise the auto-open effect
+            // immediately reopens it on next render.
+            if (boardRequirement === null) setBoardSheetSlot(null);
+          }}
           onClear={clearBoard}
         />
       )}
