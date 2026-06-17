@@ -12,6 +12,8 @@ import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
 import BoardCardSheet from "../components/BoardCardSheet";
 import BetSizeSheet from "../components/BetSizeSheet";
+import CardPickerSheet from "../components/CardPickerSheet";
+import NoteSheet from "../components/NoteSheet";
 import { positionLabels } from "../positions";
 
 // ----- helpers --------------------------------------------------------------
@@ -109,6 +111,15 @@ export default function Hand() {
   const [pending, setPending] = useState<null | "BET" | "RAISE" | "ALL_IN">(null);
   const [allInDraft, setAllInDraft] = useState<number>(0);
   const [boardSheetSlot, setBoardSheetSlot] = useState<number | null>(null);
+  const [heroCardsOpen, setHeroCardsOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [knownCardsSeat, setKnownCardsSeat] = useState<number | null>(null);
+
+  // result-entry state, seeded once when the hand becomes complete
+  const resultSeededRef = useRef(false);
+  const [showdown, setShowdown] = useState(false);
+  const [shares, setShares] = useState<Record<number, string>>({});
+  const [knownCards, setKnownCards] = useState<Record<number, [string, string]>>({});
 
   // auto-open board picker when a street closes and the next street's cards
   // haven't been entered yet. Tracked by a ref so cancel doesn't loop.
@@ -132,6 +143,31 @@ export default function Hand() {
       }
     }
   }, [hand, state, boardSheetSlot, pending]);
+
+  // seed the result-entry panel once the hand completes (reset if undone back)
+  useEffect(() => {
+    if (!hand || !state) return;
+    if (!state.handComplete) {
+      resultSeededRef.current = false;
+      return;
+    }
+    if (resultSeededRef.current) return;
+    resultSeededRef.current = true;
+    const survivors = state.inHand;
+    if (hand.finalized && hand.result.winners.length > 0) {
+      const m: Record<number, string> = {};
+      for (const w of hand.result.winners) m[w.seat] = String(w.amount);
+      setShares(m);
+      setShowdown(hand.result.wentToShowdown);
+      const kc: Record<number, [string, string]> = {};
+      for (const k of hand.result.knownCards) kc[k.seat] = k.cards;
+      setKnownCards(kc);
+    } else {
+      setShares(survivors.length === 1 ? { [survivors[0]]: String(state.pot) } : {});
+      setShowdown(survivors.length > 1);
+      setKnownCards({});
+    }
+  }, [hand, state]);
 
   if (!session || !hand || !setup || !state || !settings) {
     return (
@@ -180,7 +216,9 @@ export default function Hand() {
     isFolded: foldedSet.has(s.seat),
     isAllIn: allInSet.has(s.seat),
     cards:
-      s.seat === heroSeat && hand.heroCards ? hand.heroCards : null,
+      s.seat === heroSeat && hand.heroCards
+        ? hand.heroCards
+        : knownCards[s.seat] ?? null,
     liveBet: state.liveThisStreet[s.seat] ?? 0,
   }));
 
@@ -334,6 +372,56 @@ export default function Hand() {
     await Actions.popLast(handId);
   };
 
+  const saveHeroCards = async (cards: (string | null)[]) => {
+    const c0 = cards[0];
+    const c1 = cards[1];
+    await Hands.update(hand.id, {
+      heroCards: c0 && c1 ? [c0, c1] : null,
+    });
+    setHeroCardsOpen(false);
+  };
+
+  const saveNote = async (note: string) => {
+    await Hands.update(hand.id, { note });
+    setNoteOpen(false);
+  };
+
+  const saveKnownCards = async (seat: number, cards: (string | null)[]) => {
+    const c0 = cards[0];
+    const c1 = cards[1];
+    setKnownCards((prev) => {
+      const next = { ...prev };
+      if (c0 && c1) next[seat] = [c0, c1];
+      else delete next[seat];
+      return next;
+    });
+    setKnownCardsSeat(null);
+  };
+
+  // ----- result entry (shown when the hand is complete) --------------------
+
+  const survivors = state.inHand;
+  const sharesTotal = Object.values(shares).reduce(
+    (s, v) => s + (parseFloat(v) || 0),
+    0
+  );
+  const sharesRemainder = state.pot - sharesTotal;
+
+  const setShare = (seat: number, v: string) =>
+    setShares((prev) => ({ ...prev, [seat]: v }));
+  const assignAllTo = (seat: number) =>
+    setShares({ [seat]: String(state.pot) });
+  const splitEvenly = () => {
+    if (survivors.length === 0) return;
+    const each = Math.floor(state.pot / survivors.length);
+    const rem = state.pot - each * survivors.length;
+    const m: Record<number, string> = {};
+    survivors.forEach((s, i) => {
+      m[s] = String(each + (i === 0 ? rem : 0));
+    });
+    setShares(m);
+  };
+
   const foldAll = async () => {
     if (!handId || state.currentSeat === null) return;
     // fold every still-acting seat except Hero (or the current actor if Hero is gone)
@@ -355,32 +443,42 @@ export default function Hand() {
     if (rows.length > 0) await Actions.bulkCreate(rows);
   };
 
-  const nextHand = async () => {
-    // finalize current hand if not finalized
-    if (!hand.finalized) {
-      const survivors = state.inHand;
-      const winners =
-        survivors.length === 1
-          ? [{ seat: survivors[0], amount: state.pot }]
-          : hand.result.winners;
-      await Hands.update(hand.id, {
-        finalized: true,
-        endedAt: Date.now(),
-        pot: state.pot,
-        result: { ...hand.result, winners },
-      });
+  // build the winners array from the result-entry shares
+  const buildWinners = (): { seat: number; amount: number }[] => {
+    const ws = Object.entries(shares)
+      .map(([seat, v]) => ({ seat: Number(seat), amount: parseFloat(v) || 0 }))
+      .filter((w) => w.amount > 0);
+    if (ws.length === 0 && survivors.length === 1) {
+      return [{ seat: survivors[0], amount: state.pot }];
     }
-    // rotate BTN to next active seat, update player stacks
+    return ws;
+  };
+
+  const nextHand = async () => {
+    const winners = buildWinners();
+    const knownArr = Object.entries(knownCards).map(([seat, cards]) => ({
+      seat: Number(seat),
+      cards,
+    }));
+    await Hands.update(hand.id, {
+      finalized: true,
+      endedAt: Date.now(),
+      pot: state.pot,
+      result: {
+        winners,
+        wentToShowdown: showdown,
+        knownCards: knownArr,
+      },
+    });
+
+    // rotate BTN to next active seat, update player stacks from the result
     const next = nextActive(hand.buttonSeat, session.seatCount, activeSeats) ?? hand.buttonSeat;
-    // bump stacks
     const roster = await Players.forSession(session.id);
     for (const p of roster) {
       const snap = hand.seats.find((s) => s.seat === p.seat);
       if (!snap) continue;
-      const delta =
-        (hand.result.winners.find((w) => w.seat === p.seat)?.amount ??
-          (state.inHand.length === 1 && state.inHand[0] === p.seat ? state.pot : 0)) -
-        (state.spentTotal[p.seat] ?? 0);
+      const won = winners.find((w) => w.seat === p.seat)?.amount ?? 0;
+      const delta = won - (state.spentTotal[p.seat] ?? 0);
       const newStack = (p.stack ?? snap.startStack) + delta;
       if (newStack !== p.stack) await Players.update(p.id, { stack: newStack });
     }
@@ -451,11 +549,121 @@ export default function Hand() {
         />
       </div>
 
+      {/* Hero cards + note row — available throughout the hand */}
+      <div className="px-3 pt-2 flex gap-2">
+        <button
+          onClick={() => setHeroCardsOpen(true)}
+          className="flex-1 py-2 bg-neutral-800 rounded text-sm"
+        >
+          Hero:{" "}
+          <span className="font-mono">
+            {hand.heroCards ? hand.heroCards.join(" ") : "未入力"}
+          </span>
+        </button>
+        <button
+          onClick={() => setNoteOpen(true)}
+          className={`flex-1 py-2 rounded text-sm ${hand.note ? "bg-blue-900/50 border border-blue-700" : "bg-neutral-800"}`}
+        >
+          ✎ メモ{hand.note ? " ●" : ""}
+        </button>
+      </div>
+
       <div className="flex-1 p-3 space-y-2">
         {state.handComplete ? (
-          <button onClick={nextHand} className="w-full py-4 bg-emerald-600 rounded font-bold text-lg">
-            Next Hand ▶
-          </button>
+          <div className="space-y-3">
+            <div className="bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-bold">結果</div>
+                <div className="text-sm text-neutral-300">Pot {state.pot}</div>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={showdown}
+                  onChange={(e) => setShowdown(e.target.checked)}
+                />
+                ショーダウンに行った
+              </label>
+
+              <div className="text-xs text-neutral-400">勝者とポット配分</div>
+              <ul className="space-y-1">
+                {survivors.map((s) => {
+                  const snap = hand.seats.find((x) => x.seat === s);
+                  return (
+                    <li key={s} className="flex gap-2 items-center">
+                      <div className="w-24 text-sm truncate">
+                        S{s} {snap?.name ?? ""}
+                      </div>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        onFocus={(e) => e.currentTarget.select()}
+                        value={shares[s] ?? ""}
+                        onChange={(e) => setShare(s, e.target.value)}
+                        placeholder="0"
+                        className="flex-1"
+                      />
+                      <button
+                        onClick={() => assignAllTo(s)}
+                        className="px-2 py-2 bg-neutral-800 rounded text-xs whitespace-nowrap"
+                      >
+                        全部
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={splitEvenly}
+                  className="text-xs px-2 py-1 bg-neutral-800 rounded"
+                >
+                  均等分配
+                </button>
+                <div
+                  className={`text-xs ${sharesRemainder === 0 ? "text-neutral-500" : "text-amber-400"}`}
+                >
+                  配分残: {sharesRemainder}
+                </div>
+              </div>
+
+              {showdown && (
+                <div className="pt-1">
+                  <div className="text-xs text-neutral-400 mb-1">
+                    ショウダウンカード（任意）
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {survivors
+                      .filter((s) => s !== heroSeat)
+                      .map((s) => {
+                        const snap = hand.seats.find((x) => x.seat === s);
+                        const kc = knownCards[s];
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => setKnownCardsSeat(s)}
+                            className="px-2 py-1 bg-neutral-800 rounded text-xs"
+                          >
+                            S{s} {snap?.name ?? ""}:{" "}
+                            <span className="font-mono">
+                              {kc ? kc.join(" ") : "🂠🂠"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={nextHand}
+              className="w-full py-4 bg-emerald-600 rounded font-bold text-lg"
+            >
+              Next Hand ▶
+            </button>
+          </div>
         ) : (
           <>
             <div className="flex gap-2 items-center">
@@ -532,6 +740,45 @@ export default function Hand() {
           initial={pending === "ALL_IN" ? allInDraft : undefined}
           onCancel={() => setPending(null)}
           onSubmit={submitAmount}
+        />
+      )}
+
+      {heroCardsOpen && (
+        <CardPickerSheet
+          title="Hero"
+          count={2}
+          initial={hand.heroCards ?? [null, null]}
+          exclude={[
+            ...board.filter((c): c is string => !!c),
+            ...Object.values(knownCards).flat(),
+          ]}
+          onSubmit={saveHeroCards}
+          onCancel={() => setHeroCardsOpen(false)}
+        />
+      )}
+
+      {knownCardsSeat !== null && (
+        <CardPickerSheet
+          title={`S${knownCardsSeat} ショウダウン`}
+          count={2}
+          initial={knownCards[knownCardsSeat] ?? [null, null]}
+          exclude={[
+            ...board.filter((c): c is string => !!c),
+            ...(hand.heroCards ?? []),
+            ...Object.entries(knownCards)
+              .filter(([s]) => Number(s) !== knownCardsSeat)
+              .flatMap(([, cards]) => cards),
+          ]}
+          onSubmit={(cards) => saveKnownCards(knownCardsSeat, cards)}
+          onCancel={() => setKnownCardsSeat(null)}
+        />
+      )}
+
+      {noteOpen && (
+        <NoteSheet
+          initial={hand.note}
+          onCancel={() => setNoteOpen(false)}
+          onSave={saveNote}
         />
       )}
     </div>
