@@ -25,8 +25,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # v1 (root) build
       - run: npm ci
       - run: npm run build
+      # v2 build, mounted at /v2 inside the Pages site
+      - run: cd v2 && npm ci
+      - run: cd v2 && npm run build
+      - run: mkdir -p dist/v2 && cp -r v2/dist/* dist/v2/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

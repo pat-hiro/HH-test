@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  @apply bg-neutral-950 text-neutral-100;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+button {
+  @apply select-none;
+}
+
+input,
+select,
+textarea {
+  @apply bg-neutral-900 border border-neutral-700 rounded px-2 py-2 text-neutral-100 w-full;
+}
+
+input[type="checkbox"] {
+  @apply w-auto;
+}
+
+label {
+  @apply text-sm text-neutral-300 block mb-1;
+}
+
+.safe-bottom {
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+}
