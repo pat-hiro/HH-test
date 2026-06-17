@@ -11,6 +11,7 @@ import type { Action as StoredAction, SessionPlayer } from "../../data/types";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
 import PlayingCard from "../components/PlayingCard";
+import DragInput from "../components/DragInput";
 import BoardCardSheet from "../components/BoardCardSheet";
 import BetSizeSheet from "../components/BetSizeSheet";
 import CardPickerSheet from "../components/CardPickerSheet";
@@ -103,7 +104,7 @@ function useEngineState(handId: string | undefined) {
 
 // ----- screen ---------------------------------------------------------------
 
-export default function Hand() {
+export default function HandDrag() {
   const { sessionId, handId } = useParams();
   const nav = useNavigate();
 
@@ -125,7 +126,10 @@ export default function Hand() {
   const { hand, setup, state } = useEngineState(handId);
 
   const [pending, setPending] = useState<null | "BET" | "RAISE" | "ALL_IN">(null);
-  const [allInDraft, setAllInDraft] = useState<number>(0);
+  // Drag layout commits all-in straight from the gesture, so we don't pre-fill
+  // a draft for the bet sheet. Keeping the value at 0 lets us still render the
+  // sheet for bet/raise prefills without an extra branch.
+  const [allInDraft] = useState<number>(0);
   const [boardSheetSlot, setBoardSheetSlot] = useState<number | null>(null);
   const [heroCardsOpen, setHeroCardsOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
@@ -531,15 +535,13 @@ export default function Hand() {
 
   const openBet = () => setPending("BET");
   const openRaise = () => setPending("RAISE");
-  const openAllIn = () => {
-    if (state.currentSeat === null) return;
-    const seat = hand.seats.find((s) => s.seat === state.currentSeat);
-    const remaining = seat
-      ? Math.max(0, seat.startStack - (state.spentTotal[seat.seat] ?? 0))
-      : 0;
-    setAllInDraft(remaining);
-    setPending("ALL_IN");
-  };
+  /** Commit an all-in immediately, no sheet. Used by the drag overlay when
+   *  the user pulls past the all-in threshold — the gesture is intentional
+   *  enough that a confirm-shove sheet just adds friction. */
+  const openAllInDirect = () =>
+    commit((st) =>
+      st.currentSeat !== null ? { seat: st.currentSeat, type: "allin" } : null
+    );
 
   const submitAmount = async (amt: number) => {
     const kind = pending;
@@ -897,17 +899,8 @@ export default function Hand() {
 
   // ----- render -------------------------------------------------------------
 
-  // Board entry no longer blocks action — the user can skip remembering
-  // any board card and continue logging. boardRequirement exists only to
-  // drive the one-time auto-prompt above.
-  const canCheck = state.toCall === 0;
-  const canCall = state.toCall > 0;
-  const canBet = state.currentBet === 0 && state.currentSeat !== null;
-  // BB option / facing a raise — both allow Raise. Show alongside Check when
-  // there's a live bet but I owe nothing (e.g., BB in a limped pot). Suppressed
-  // when state.canRaise is false (e.g., facing a partial all-in: call only).
-  const canRaise =
-    state.currentBet > 0 && state.currentSeat !== null && state.canRaise;
+  // Drag layout exposes legality straight to the DragInput component — the
+  // action buttons that used these flags in the classic layout are gone.
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -921,13 +914,11 @@ export default function Hand() {
           ‹ Session Setup
         </button>
         <button
-          onClick={() =>
-            nav(`/sessions/${session.id}/hands/${hand.id}/drag`)
-          }
-          className="ml-auto text-[11px] text-neutral-300 px-2 py-0.5 rounded bg-emerald-900/70 border border-emerald-700"
-          title="ドラッグ入力レイアウト（実験中）"
+          onClick={() => nav(`/sessions/${session.id}/hands/${hand.id}`)}
+          className="ml-auto text-[11px] text-neutral-400 px-2 py-0.5 rounded bg-neutral-800"
+          title="ボタン式の元レイアウトに戻る"
         >
-          🔀 Drag
+          Classic
         </button>
         <div className="ml-2 text-xs text-neutral-500">
           Hand #{hand.handNo}
@@ -961,7 +952,7 @@ export default function Hand() {
         </button>
       </div>
 
-      <div className="px-2 pt-2">
+      <div className="relative">
         <PokerTable
           totalSeats={session.seatCount}
           seats={seatVMs}
@@ -972,7 +963,37 @@ export default function Hand() {
           onTapEmptySeat={(seat) => setSeatingSeat(seat)}
           onTapBoardSlot={onTapBoardSlot}
           bb={hand.bb}
+          portrait
+          heroSeat={heroSeat}
+          aspectRatio="3/5"
+          maxHeightClass="max-h-[68vh]"
         />
+        {/* Drag input overlay — anchored to the current actor's seat. Reads
+            the same seat coordinates as PokerTable so it's always exactly on
+            top of the avatar. Hidden when the action panel takes over. */}
+        {!showResult && state.currentSeat !== null && (
+          <DragInput
+            seat={state.currentSeat}
+            totalSeats={session.seatCount}
+            heroSeat={heroSeat}
+            canCheck={state.toCall === 0}
+            canCall={state.toCall > 0}
+            canBet={state.currentBet === 0}
+            canRaise={
+              state.currentBet > 0 &&
+              state.canRaise &&
+              state.toCall < maxTotalFor(state, state.currentSeat) -
+                (state.liveThisStreet[state.currentSeat] ?? 0)
+            }
+            toCallAmount={state.toCall}
+            onFold={onFold}
+            onCheck={onCheck}
+            onCall={onCall}
+            onBet={openBet}
+            onRaise={openRaise}
+            onAllIn={openAllInDirect}
+          />
+        )}
       </div>
 
       {/* Hero cards + note row — available throughout the hand */}
@@ -1212,6 +1233,13 @@ export default function Hand() {
           </div>
         ) : (
           <>
+            {/* In drag mode the action input lives on the table itself (a
+                radial that appears under the thumb when you press the current
+                actor). Down here we only keep the street-wide shortcuts
+                (Fold All / Check Thru) and the board-entry nudge. */}
+            <div className="text-center text-[11px] text-neutral-500 -mt-1">
+              アバターを上下左右にドラッグ：↑ Bet/Raise（長めで All-in） ／ ↓ Fold ／ ← Check ／ → Call
+            </div>
             {(state.street === "PF" ||
               (state.toCall === 0 && state.currentSeat !== null)) && (
               <div className="flex justify-end">
@@ -1229,43 +1257,6 @@ export default function Hand() {
                 )}
               </div>
             )}
-
-            {canCall && (
-              <button onClick={onCall} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
-                Call {fmtChips(state.toCall)}
-              </button>
-            )}
-            {canCheck && state.currentSeat !== null && (
-              <button onClick={onCheck} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
-                Check
-              </button>
-            )}
-            {canRaise && (
-              <button onClick={openRaise} className="w-full py-4 bg-emerald-600 rounded font-bold text-lg">
-                Raise
-              </button>
-            )}
-            {canBet && (
-              <button onClick={openBet} className="w-full py-4 bg-emerald-600 rounded font-bold text-lg">
-                Bet
-              </button>
-            )}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={onFold}
-                disabled={state.currentSeat === null}
-                className="py-4 bg-rose-500 rounded font-bold text-lg disabled:opacity-40"
-              >
-                Fold
-              </button>
-              <button
-                onClick={openAllIn}
-                disabled={state.currentSeat === null}
-                className="py-4 bg-amber-500 rounded font-bold text-lg disabled:opacity-40"
-              >
-                All-in
-              </button>
-            </div>
             {boardRequirement && (
               <button
                 onClick={() => setBoardSheetSlot(boardRequirement.startSlot)}

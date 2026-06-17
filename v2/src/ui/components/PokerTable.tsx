@@ -167,6 +167,9 @@ export default function PokerTable({
   onTapBoardSlot,
   aspectRatio = "16/10",
   bb = 1,
+  portrait = false,
+  heroSeat = null,
+  maxHeightClass,
 }: {
   totalSeats: number;
   seats: SeatVM[];
@@ -180,16 +183,28 @@ export default function PokerTable({
   aspectRatio?: string;
   /** big blind, used to scale the chip-shade gradient by bet-size */
   bb?: number;
+  /** PPPoker-style vertical oval; the hero seat rotates to the bottom centre */
+  portrait?: boolean;
+  /** required when portrait=true to anchor the hero seat at the bottom */
+  heroSeat?: number | null;
+  /** override the default max height (e.g. fill the viewport in drag mode) */
+  maxHeightClass?: string;
 }): ReactNode {
+  const seatOpts = { portrait, heroSeat };
   return (
-    <div className="relative w-full max-h-[46vh]" style={{ aspectRatio }}>
+    <div
+      className={`relative w-full ${maxHeightClass ?? "max-h-[46vh]"}`}
+      style={{ aspectRatio }}
+    >
       {/* Wide "racetrack" felt — closer to a real cardroom table than a tall
           oval, and it frees vertical room on the phone for the action row. */}
       <div className="absolute inset-x-1 top-[8%] bottom-[8%] rounded-[46%] bg-gradient-to-b from-felt-700 to-felt-900 border-[6px] border-neutral-900 shadow-inner" />
 
-      {/* Dealer — croupier illustration at the top-centre of the felt. */}
-      {(() => {
-        const dx = dealerXY();
+      {/* Dealer — croupier illustration at the top-centre of the felt. Hidden
+          in portrait mode where the ring is rotated to put the hero on the
+          bottom (the dealer slot would land at a random angle). */}
+      {!portrait && (() => {
+        const dx = dealerXY(seatOpts);
         return (
           <div
             className="absolute z-10 pointer-events-none flex flex-col items-center"
@@ -225,7 +240,7 @@ export default function PokerTable({
       </div>
 
       {seats.map((s) => {
-        const { x, y } = seatXY(s.seat, totalSeats);
+        const { x, y } = seatXY(s.seat, totalSeats, seatOpts);
 
         // ----- empty chair: seat number + ＋ only --------------------------
         if (s.empty) {

@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import Entry from "./screens/Entry";
 import Setup from "./screens/Setup";
 import Hand from "./screens/Hand";
+import HandDrag from "./screens/HandDrag";
 import Review from "./screens/Review";
 import Bankroll from "./screens/Bankroll";
 import SettingsScreen from "./screens/Settings";
@@ -15,6 +16,10 @@ import { db } from "../data/db";
 function HandWrapper() {
   const params = useParams();
   return <Hand key={params.handId ?? ""} />;
+}
+function HandDragWrapper() {
+  const params = useParams();
+  return <HandDrag key={params.handId ?? ""} />;
 }
 
 function WithTabBar({ children }: { children: React.ReactNode }) {
@@ -42,6 +47,7 @@ export default function App() {
         <Route path="/" element={<Entry />} />
         <Route path="/sessions/:sessionId/setup" element={<WithTabBar><Setup /></WithTabBar>} />
         <Route path="/sessions/:sessionId/hands/:handId" element={<WithTabBar><HandWrapper /></WithTabBar>} />
+        <Route path="/sessions/:sessionId/hands/:handId/drag" element={<WithTabBar><HandDragWrapper /></WithTabBar>} />
         <Route path="/review" element={<WithTabBar><Review /></WithTabBar>} />
         <Route path="/bankroll" element={<WithTabBar><Bankroll /></WithTabBar>} />
         <Route path="/settings" element={<WithTabBar><SettingsScreen /></WithTabBar>} />

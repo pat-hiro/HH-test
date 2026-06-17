@@ -28,24 +28,41 @@ export function positionLabels(
   return map;
 }
 
-export function seatXY(seat: number, total: number): { x: number; y: number } {
+export function seatXY(
+  seat: number,
+  total: number,
+  opts: { portrait?: boolean; heroSeat?: number | null } = {}
+): { x: number; y: number } {
   // Cardroom convention: the dealer occupies the top-centre slot, and seat
   // numbering starts to the dealer's RIGHT (= top-right area) and runs
   // clockwise around the table. We treat the dealer + N seats as (N+1)
   // evenly-spaced slots around the oval. Slot 0 is the dealer; slot k (= seat
   // k) is at angle -90° + k * (360 / (N+1)).
   const slots = total + 1;
-  const angle = (seat * (360 / slots) - 90) * (Math.PI / 180);
-  // Wider X radius + flatter Y radius spreads the seats along the two long
-  // sides of a landscape "racetrack" table, the way a real cardroom table
-  // reads, instead of a tall portrait oval.
+  // Portrait + heroSeat: rotate the whole ring so the hero's seat sits at the
+  // bottom-centre, PPPoker-style. The hero's action is then right under the
+  // thumb regardless of which chair they actually drew.
+  const rotDeg =
+    opts.portrait && opts.heroSeat
+      ? 180 - opts.heroSeat * (360 / slots)
+      : 0;
+  const angleDeg = seat * (360 / slots) - 90 + rotDeg;
+  const angle = (angleDeg * Math.PI) / 180;
+  // Landscape: wider X, flatter Y — reads like a cardroom table.
+  // Portrait: taller Y, narrower X — vertical oval that fills a phone screen.
+  const rx = opts.portrait ? 38 : 44;
+  const ry = opts.portrait ? 44 : 37;
   return {
-    x: 50 + 44 * Math.cos(angle),
-    y: 50 + 37 * Math.sin(angle),
+    x: 50 + rx * Math.cos(angle),
+    y: 50 + ry * Math.sin(angle),
   };
 }
 
 /** Position of the dealer marker — always top centre of the racetrack. */
-export function dealerXY(): { x: number; y: number } {
-  return { x: 50, y: 50 - 37 };
+export function dealerXY(opts: { portrait?: boolean } = {}): {
+  x: number;
+  y: number;
+} {
+  const ry = opts.portrait ? 44 : 37;
+  return { x: 50, y: 50 - ry };
 }
