@@ -221,6 +221,10 @@ export default function Setup() {
         target.name.trim() === "" || target.name.trim() === "Unknown";
       await Players.update(target.id, {
         isHero: true,
+        // Hero is always in the hand — bring them back from sit-out so the
+        // seat re-enters activeSeats (otherwise heroSeat points at a seat the
+        // hand snapshot excludes and the blind math runs off a phantom seat).
+        isAway: false,
         ...(isPlaceholder ? { name: heroDefault } : {}),
       });
     }
@@ -228,10 +232,29 @@ export default function Setup() {
     setShowHero(false);
   };
 
+  // Require Hero AND the button to be on a seat that's actually active (named,
+  // not sitting out). Without the activeSeats checks the user could sit out
+  // the Hero or BTN, leave the pointers dangling, and Start Hand would snapshot
+  // a hand whose button isn't in the seat roster → garbage blinds.
   const ready =
     session.heroSeat !== null &&
     session.buttonSeat !== null &&
+    activeSeats.includes(session.heroSeat) &&
+    activeSeats.includes(session.buttonSeat) &&
     activeSeats.length >= 2;
+
+  // Precise reason the Start button is disabled, so a sat-out Hero/BTN doesn't
+  // look like a frozen button.
+  const notReadyReason = (): string => {
+    if (activeSeats.length < 2) return "プレイヤーが2人以上必要です";
+    if (session.heroSeat === null) return "Hero を選んでください";
+    if (!activeSeats.includes(session.heroSeat))
+      return "Hero が着席していません（空席/離席）";
+    if (session.buttonSeat === null) return "BTN を選んでください";
+    if (!activeSeats.includes(session.buttonSeat))
+      return "BTN が着席していません（移動してください）";
+    return "Hero と BTN を選んでください";
+  };
 
   // Start a brand-new session, cloning the current stakes/seat config so the
   // common case (same game, new sit-down) is one tap. Roster resets to Unknown.
@@ -552,7 +575,7 @@ export default function Setup() {
               : "bg-neutral-800 opacity-60"
           }`}
         >
-          {ready ? "Start Hand ▶" : "Hero と BTN を選んでください"}
+          {ready ? "Start Hand ▶" : notReadyReason()}
         </button>
 
         {(sessionHands?.length ?? 0) > 0 && (

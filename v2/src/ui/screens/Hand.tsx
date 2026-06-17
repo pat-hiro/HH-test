@@ -6,7 +6,7 @@ import { Actions, Events, Hands, Players, Sessions, Settings } from "../../data/
 import { makeSetup, nextActive } from "../../engine/setup";
 import { computeState, moveToAction } from "../../engine/reducer";
 import type { Move } from "../../engine/reducer";
-import type { Action as EngineAction, Street } from "../../engine/types";
+import type { Action as EngineAction, HandState, Street } from "../../engine/types";
 import type { Action as StoredAction } from "../../data/types";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
@@ -115,7 +115,7 @@ export default function Hand() {
     () => (handId ? Events.forHand(handId) : []),
     [handId]
   );
-  const { hand, stored, setup, engineActions, state } = useEngineState(handId);
+  const { hand, setup, state } = useEngineState(handId);
 
   const [pending, setPending] = useState<null | "BET" | "RAISE" | "ALL_IN">(null);
   const [allInDraft, setAllInDraft] = useState<number>(0);
@@ -124,6 +124,12 @@ export default function Hand() {
   const [noteOpen, setNoteOpen] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
   const [knownCardsSeat, setKnownCardsSeat] = useState<number | null>(null);
+
+  // Serializes all action writes. Two rapid taps must not (a) collide on the
+  // `order` key or (b) compute their move against a stale, pre-first-tap state.
+  // Every mutation runs inside this chain, reads the authoritative action list
+  // straight from the DB, recomputes engine state, and appends atomically.
+  const writeLock = useRef<Promise<unknown>>(Promise.resolve());
 
   // result-entry state, seeded once when the hand becomes complete
   const resultSeededRef = useRef(false);
@@ -182,7 +188,10 @@ export default function Hand() {
     setBoardSheetSlot(boardRequirement.startSlot);
   }, [boardRequirement, boardSheetSlot, pending, state]);
 
-  // seed the result-entry panel once the hand reaches result (reset if undone)
+  // seed the result-entry panel once the hand reaches result (reset if undone).
+  // Seed from the persisted result whenever it has content — not only when the
+  // hand is finalized — so villain cards / shares typed before finalizing
+  // survive a reload or backgrounding (they are autosaved below).
   useEffect(() => {
     if (!hand || !state) return;
     if (!showResult) {
@@ -192,13 +201,15 @@ export default function Hand() {
     if (resultSeededRef.current) return;
     resultSeededRef.current = true;
     const survivors = state.inHand;
-    if (hand.finalized && hand.result.winners.length > 0) {
+    const r = hand.result;
+    const hasDraft = r.winners.length > 0 || r.knownCards.length > 0;
+    if (hasDraft) {
       const m: Record<number, string> = {};
-      for (const w of hand.result.winners) m[w.seat] = String(w.amount);
+      for (const w of r.winners) m[w.seat] = String(w.amount);
       setShares(m);
-      setShowdown(hand.result.wentToShowdown);
+      setShowdown(r.wentToShowdown);
       const kc: Record<number, [string, string]> = {};
-      for (const k of hand.result.knownCards) kc[k.seat] = k.cards;
+      for (const k of r.knownCards) kc[k.seat] = k.cards;
       setKnownCards(kc);
     } else {
       setShares(survivors.length === 1 ? { [survivors[0]]: String(state.pot) } : {});
@@ -206,6 +217,25 @@ export default function Hand() {
       setKnownCards({});
     }
   }, [hand, state, showResult]);
+
+  // Autosave the in-progress result (shares / showdown / known cards) onto the
+  // hand so nothing is lost if the app reloads before the user taps Next Hand.
+  // Guarded by a content compare so the write can't loop against its own
+  // liveQuery update.
+  useEffect(() => {
+    if (!hand || !showResult || hand.finalized) return;
+    if (!resultSeededRef.current) return;
+    const winners = Object.entries(shares)
+      .map(([seat, v]) => ({ seat: Number(seat), amount: parseFloat(v) || 0 }))
+      .filter((w) => w.amount > 0);
+    const knownArr = Object.entries(knownCards).map(([seat, cards]) => ({
+      seat: Number(seat),
+      cards,
+    }));
+    const next = { winners, wentToShowdown: showdown, knownCards: knownArr };
+    if (JSON.stringify(next) === JSON.stringify(hand.result)) return;
+    void Hands.update(hand.id, { result: next });
+  }, [shares, showdown, knownCards, showResult, hand]);
 
   if (!session || !hand || !setup || !state || !settings) {
     return (
@@ -279,94 +309,137 @@ export default function Hand() {
 
   // ----- mutations ----------------------------------------------------------
 
-  async function persist(move: Move) {
-    if (!handId) return;
-    const a = moveToAction(setup!, engineActions, move);
-    const order = stored.length;
-    await Actions.create({
-      handId,
-      order,
+  // Queue `fn` after any in-flight write so writes never overlap. The chain
+  // swallows errors so one rejection doesn't wedge every later write.
+  function withLock<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    const run = writeLock.current.then(
+      () => fn(),
+      () => fn()
+    );
+    writeLock.current = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /** Read the authoritative action log straight from the DB (not the stale
+   *  liveQuery snapshot) and adapt it to engine actions. */
+  async function freshEngineActions(): Promise<EngineAction[]> {
+    if (!handId) return [];
+    const rows = await Actions.forHand(handId);
+    return rows.map((a) => ({
       street: a.street,
       seat: a.seat,
       type: a.type,
       amount: a.amount,
-      isAllIn: a.type === "allin",
+    }));
+  }
+
+  /** The largest TOTAL this-street commitment `seat` can afford — used to cap
+   *  bet/raise amounts so a fat-finger can't record more chips than the seat
+   *  physically has (it just becomes an all-in for the real stack). */
+  function maxTotalFor(st: HandState, seat: number): number {
+    const snap = hand?.seats.find((s) => s.seat === seat);
+    if (!snap) return Infinity;
+    const spent = st.spentTotal[seat] ?? 0;
+    const live = st.liveThisStreet[seat] ?? 0;
+    return live + Math.max(0, snap.startStack - spent);
+  }
+
+  /** Resolve `intent` against the freshest engine state, then append the
+   *  resulting action atomically. `resolve` returns null to abort. */
+  function commit(resolve: (st: HandState) => Move | null) {
+    if (!setup || !handId) return;
+    return withLock(async () => {
+      const ea = await freshEngineActions();
+      const st = computeState(setup, ea);
+      const move = resolve(st);
+      if (!move) return;
+      const a = moveToAction(setup, ea, move);
+      await Actions.append({
+        handId,
+        street: a.street,
+        seat: a.seat,
+        type: a.type,
+        amount: a.amount,
+        isAllIn: a.type === "allin",
+      });
     });
   }
 
-  const onTapSeat = async (seat: number) => {
-    if (state.currentSeat === null) return;
-    if (state.currentSeat === seat) return;
-    if (foldedSet.has(seat) || allInSet.has(seat)) return;
-    if (!handId) return;
-    // Defensive: refuse to advance to a seat that the engine never sees (e.g.
-    // a freshly emptied chair that's no longer in the hand snapshot). Without
-    // this guard, the loop below would fold every remaining seat in pursuit
-    // of an unreachable target — which is what produced the
-    // "Unknown プレイヤーをタップしたらハンドが終了した" report.
-    if (!activeSeats.includes(seat)) return;
+  const onTapSeat = (seat: number) =>
+    withLock(async () => {
+      if (!setup || !handId) return;
+      // Defensive: refuse to advance to a seat that the engine never sees (e.g.
+      // a freshly emptied chair that's no longer in the hand snapshot). Without
+      // this guard, the loop below would fold every remaining seat in pursuit
+      // of an unreachable target — which is what produced the
+      // "Unknown プレイヤーをタップしたらハンドが終了した" report.
+      if (!activeSeats.includes(seat)) return;
 
-    // Generate fold/check moves until the action reaches `seat`.
-    const moves: Move[] = [];
-    let cur = state.currentSeat;
-    let work = [...engineActions];
-    let safety = 30;
-    while (cur !== seat && safety-- > 0) {
-      const v = computeState(setup, work);
-      if (v.currentSeat === null) break;
-      const move: Move =
-        v.toCall > 0 ? { seat: v.currentSeat, type: "fold" } : { seat: v.currentSeat, type: "check" };
-      moves.push(move);
-      const ea = moveToAction(setup, work, move);
-      work = [...work, ea];
-      cur = v.currentSeat === seat ? seat : work[work.length - 1].seat;
-      const nv = computeState(setup, work);
-      if (nv.currentSeat === seat) break;
-    }
-    if (moves.length === 0) return;
+      const ea0 = await freshEngineActions();
+      const st0 = computeState(setup, ea0);
+      if (st0.currentSeat === null || st0.currentSeat === seat) return;
+      if (st0.folded.includes(seat) || st0.allIn.includes(seat)) return;
 
-    // Look at the resulting engine state. If the auto-fold cascade ends the
-    // hand or never actually reaches the tapped seat, ask the user before
-    // committing — otherwise a single mis-tap silently terminates the hand.
-    const projected = computeState(setup, work);
-    const foldCount = moves.filter((m) => m.type === "fold").length;
-    const wouldEndHand =
-      projected.inHand.length <= 1 || projected.handComplete;
-    const targetReached = projected.currentSeat === seat;
-    if (wouldEndHand) {
-      if (
-        !confirm(
-          `このタップで ${foldCount} 人が fold してハンドが終了します。続行しますか？`
+      // Generate fold/check moves until the action reaches `seat`.
+      const moves: Move[] = [];
+      let work = [...ea0];
+      let safety = setup.seatCount + 1;
+      while (safety-- > 0) {
+        const v = computeState(setup, work);
+        if (v.currentSeat === null || v.currentSeat === seat) break;
+        const move: Move =
+          v.toCall > 0
+            ? { seat: v.currentSeat, type: "fold" }
+            : { seat: v.currentSeat, type: "check" };
+        moves.push(move);
+        work = [...work, moveToAction(setup, work, move)];
+      }
+      if (moves.length === 0) return;
+
+      // Look at the resulting engine state. If the auto-fold cascade ends the
+      // hand or never actually reaches the tapped seat, ask the user before
+      // committing — otherwise a single mis-tap silently terminates the hand.
+      const projected = computeState(setup, work);
+      const foldCount = moves.filter((m) => m.type === "fold").length;
+      const wouldEndHand = projected.inHand.length <= 1 || projected.handComplete;
+      const targetReached = projected.currentSeat === seat;
+      if (wouldEndHand) {
+        if (
+          !confirm(
+            `このタップで ${foldCount} 人が fold してハンドが終了します。続行しますか？`
+          )
         )
-      )
-        return;
-    } else if (!targetReached && foldCount >= 3) {
-      if (
-        !confirm(
-          `タップした席まで届かず、${foldCount} 人が fold します。続行しますか？`
+          return;
+      } else if (!targetReached && foldCount >= 3) {
+        if (
+          !confirm(
+            `タップした席まで届かず、${foldCount} 人が fold します。続行しますか？`
+          )
         )
-      )
-        return;
-    }
+          return;
+      }
 
-    const newRows: Omit<StoredAction, "id" | "updatedAt" | "deletedAt">[] = [];
-    let baseOrder = stored.length;
-    let progress = [...engineActions];
-    for (const m of moves) {
-      const ea = moveToAction(setup, progress, m);
-      newRows.push({
-        handId,
-        order: baseOrder++,
-        street: ea.street,
-        seat: ea.seat,
-        type: ea.type,
-        amount: ea.amount,
-        isAllIn: false,
-      });
-      progress = [...progress, ea];
-    }
-    await Actions.bulkCreate(newRows);
-  };
+      const rows: Omit<
+        StoredAction,
+        "id" | "updatedAt" | "deletedAt" | "order" | "handId"
+      >[] = [];
+      let progress = [...ea0];
+      for (const m of moves) {
+        const a = moveToAction(setup, progress, m);
+        rows.push({
+          street: a.street,
+          seat: a.seat,
+          type: a.type,
+          amount: a.amount,
+          isAllIn: false,
+        });
+        progress = [...progress, a];
+      }
+      await Actions.appendMany(handId, rows);
+    });
 
   const onTapBoardSlot = (i: number) => setBoardSheetSlot(i);
 
@@ -392,12 +465,23 @@ export default function Hand() {
     setBoardSheetSlot(null);
   };
 
+  // Each acts on whoever is to act in the FRESH engine state, so a queued tap
+  // (fired before the previous one's liveQuery round-trip) targets the right
+  // seat instead of re-acting for the seat that already acted.
   const onFold = () =>
-    state.currentSeat !== null && persist({ seat: state.currentSeat, type: "fold" });
+    commit((st) =>
+      st.currentSeat !== null ? { seat: st.currentSeat, type: "fold" } : null
+    );
   const onCheck = () =>
-    state.currentSeat !== null && persist({ seat: state.currentSeat, type: "check" });
+    commit((st) =>
+      st.currentSeat !== null && st.toCall === 0
+        ? { seat: st.currentSeat, type: "check" }
+        : null
+    );
   const onCall = () =>
-    state.currentSeat !== null && persist({ seat: state.currentSeat, type: "call" });
+    commit((st) =>
+      st.currentSeat !== null ? { seat: st.currentSeat, type: "call" } : null
+    );
 
   const openBet = () => setPending("BET");
   const openRaise = () => setPending("RAISE");
@@ -412,24 +496,35 @@ export default function Hand() {
   };
 
   const submitAmount = async (amt: number) => {
-    if (state.currentSeat === null || !handId) return;
-    if (pending === "BET") {
-      await persist({ seat: state.currentSeat, type: "bet", to: amt });
-    } else if (pending === "RAISE") {
-      await persist({ seat: state.currentSeat, type: "raise", to: amt });
-    } else if (pending === "ALL_IN") {
+    const kind = pending;
+    setPending(null);
+    if (kind === "BET" || kind === "RAISE") {
+      const type = kind === "BET" ? "bet" : "raise";
+      await commit((st) => {
+        if (st.currentSeat === null) return null;
+        // Cap the target to the seat's stack: a typo'd over-bet can't record
+        // more chips than the seat has — it collapses to an all-in instead.
+        const to = Math.min(amt, maxTotalFor(st, st.currentSeat));
+        return { seat: st.currentSeat, type, to };
+      });
+    } else if (kind === "ALL_IN") {
       // honor the user's amount (lets them correct an outdated snapshot stack)
-      await Actions.create({
-        handId,
-        order: stored.length,
-        street: state.street,
-        seat: state.currentSeat,
-        type: "allin",
-        amount: amt,
-        isAllIn: true,
+      // but never less than 0; resolved against the freshest state.
+      await withLock(async () => {
+        if (!setup || !handId) return;
+        const ea = await freshEngineActions();
+        const st = computeState(setup, ea);
+        if (st.currentSeat === null) return;
+        await Actions.append({
+          handId,
+          street: st.street,
+          seat: st.currentSeat,
+          type: "allin",
+          amount: Math.max(0, amt),
+          isAllIn: true,
+        });
       });
     }
-    setPending(null);
   };
 
   // straddle amount in the current hand (if any) — needed for "str"-basis presets
@@ -461,33 +556,43 @@ export default function Hand() {
     return 0;
   };
 
-  const undo = async () => {
-    if (!handId) return;
-    await Actions.popLast(handId);
-  };
+  const undo = () =>
+    withLock(async () => {
+      if (handId) await Actions.popLast(handId);
+    });
 
   /** Undo every action on the current street + clear the board cards that
    *  street introduced. Handy when the user goes "no wait, that whole flop
    *  was different" and wants a single tap to back out the street. */
-  const undoStreet = async () => {
-    if (!handId || !state) return;
-    const cur = state.street;
-    const ofStreet = stored.filter((a) => a.street === cur);
-    for (const a of ofStreet) await Actions.remove(a.id);
-    if (cur === "F") {
-      await Hands.update(hand.id, {
-        board: { ...hand.board, flop: null, turn: null, river: null },
-      });
-    } else if (cur === "T") {
-      await Hands.update(hand.id, {
-        board: { ...hand.board, turn: null, river: null },
-      });
-    } else if (cur === "R") {
-      await Hands.update(hand.id, { board: { ...hand.board, river: null } });
-    }
-    // also wipe the auto-prompt memo so the next visit re-prompts cleanly
-    promptedRef.current[cur] = false;
-  };
+  const undoStreet = () =>
+    withLock(async () => {
+      if (!handId || !setup) return;
+      const rows = await Actions.forHand(handId);
+      const cur = computeState(
+        setup,
+        rows.map((a) => ({
+          street: a.street,
+          seat: a.seat,
+          type: a.type,
+          amount: a.amount,
+        }))
+      ).street;
+      const ofStreet = rows.filter((a) => a.street === cur);
+      for (const a of ofStreet) await Actions.remove(a.id);
+      if (cur === "F") {
+        await Hands.update(hand.id, {
+          board: { ...hand.board, flop: null, turn: null, river: null },
+        });
+      } else if (cur === "T") {
+        await Hands.update(hand.id, {
+          board: { ...hand.board, turn: null, river: null },
+        });
+      } else if (cur === "R") {
+        await Hands.update(hand.id, { board: { ...hand.board, river: null } });
+      }
+      // also wipe the auto-prompt memo so the next visit re-prompts cleanly
+      promptedRef.current[cur] = false;
+    });
 
   const saveHeroCards = async (cards: (string | null)[]) => {
     const c0 = cards[0];
@@ -550,31 +655,32 @@ export default function Hand() {
     setShares(m);
   };
 
-  const foldAll = async () => {
-    if (!handId) return;
-    // Fold every seat that still OWES chips on this street (live < currentBet).
-    // Seats that already matched the current bet — callers, the bettor /
-    // raiser, BB option in a limped pot, anyone who said "call" — stay in the
-    // hand. So a bet+call followed by Fold All correctly leaves the bettor
-    // and caller to see the next street. Already all-in seats stay in too.
-    const toFold = state.inHand.filter((s) => {
-      if (allInSet.has(s)) return false;
-      const live = state.liveThisStreet[s] ?? 0;
-      return live < state.currentBet;
+  const foldAll = () =>
+    withLock(async () => {
+      if (!setup || !handId) return;
+      const st = computeState(setup, await freshEngineActions());
+      // Fold every seat that still OWES chips on this street (live < currentBet).
+      // Seats that already matched the current bet — callers, the bettor /
+      // raiser, BB option in a limped pot, anyone who said "call" — stay in the
+      // hand. So a bet+call followed by Fold All correctly leaves the bettor
+      // and caller to see the next street. Already all-in seats stay in too.
+      const allInNow = new Set(st.allIn);
+      const toFold = st.inHand.filter((s) => {
+        if (allInNow.has(s)) return false;
+        return (st.liveThisStreet[s] ?? 0) < st.currentBet;
+      });
+      if (toFold.length === 0) return;
+      await Actions.appendMany(
+        handId,
+        toFold.map((s) => ({
+          street: st.street,
+          seat: s,
+          type: "fold" as const,
+          amount: 0,
+          isAllIn: false,
+        }))
+      );
     });
-    if (toFold.length === 0) return;
-    let order = stored.length;
-    const rows = toFold.map((s) => ({
-      handId,
-      order: order++,
-      street: state.street,
-      seat: s,
-      type: "fold" as const,
-      amount: 0,
-      isAllIn: false,
-    }));
-    await Actions.bulkCreate(rows);
-  };
 
   // Postflop "Check Thru" — emit a CHECK action for every remaining seat
   // until the street closes. Used by the user when nobody bet (or after a
@@ -582,32 +688,34 @@ export default function Hand() {
   // Stops if anyone faces a non-zero toCall (i.e. nothing-to-check).
   /** Check the rest of the way around THIS street only — don't bleed into
    *  the next street even if the engine would advance. */
-  const checkThru = async () => {
-    if (!handId || !state) return;
-    const startStreet = state.street;
-    let work = [...engineActions];
-    let baseOrder = stored.length;
-    const newRows: Omit<StoredAction, "id" | "updatedAt" | "deletedAt">[] = [];
-    let safety = 30;
-    while (safety-- > 0) {
-      const st = computeState(setup, work);
-      if (st.currentSeat === null) break;
-      if (st.street !== startStreet) break; // don't carry into the next street
-      if (st.toCall > 0) break; // someone has to call — abort
-      const ea = moveToAction(setup, work, { seat: st.currentSeat, type: "check" });
-      newRows.push({
-        handId,
-        order: baseOrder++,
-        street: ea.street,
-        seat: ea.seat,
-        type: ea.type,
-        amount: ea.amount,
-        isAllIn: false,
-      });
-      work = [...work, ea];
-    }
-    if (newRows.length > 0) await Actions.bulkCreate(newRows);
-  };
+  const checkThru = () =>
+    withLock(async () => {
+      if (!setup || !handId) return;
+      const work0 = await freshEngineActions();
+      const startStreet = computeState(setup, work0).street;
+      let work = [...work0];
+      const newRows: Omit<
+        StoredAction,
+        "id" | "updatedAt" | "deletedAt" | "order" | "handId"
+      >[] = [];
+      let safety = setup.seatCount + 1;
+      while (safety-- > 0) {
+        const st = computeState(setup, work);
+        if (st.currentSeat === null) break;
+        if (st.street !== startStreet) break; // don't carry into the next street
+        if (st.toCall > 0) break; // someone has to call — abort
+        const ea = moveToAction(setup, work, { seat: st.currentSeat, type: "check" });
+        newRows.push({
+          street: ea.street,
+          seat: ea.seat,
+          type: ea.type,
+          amount: ea.amount,
+          isAllIn: false,
+        });
+        work = [...work, ea];
+      }
+      if (newRows.length > 0) await Actions.appendMany(handId, newRows);
+    });
 
   // build the winners array from the result-entry shares
   const buildWinners = (): { seat: number; amount: number }[] => {
@@ -1032,6 +1140,11 @@ export default function Hand() {
           presets={presetsForPending()}
           ctx={presetCtx}
           min={pending === "ALL_IN" ? 1 : minForPending()}
+          max={
+            pending !== "ALL_IN" && state.currentSeat !== null
+              ? maxTotalFor(state, state.currentSeat)
+              : undefined
+          }
           initial={pending === "ALL_IN" ? allInDraft : undefined}
           onCancel={() => setPending(null)}
           onSubmit={submitAmount}

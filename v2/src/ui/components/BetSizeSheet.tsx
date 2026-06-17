@@ -8,6 +8,7 @@ export default function BetSizeSheet({
   presets,
   ctx,
   min,
+  max,
   initial,
   onCancel,
   onSubmit,
@@ -16,6 +17,10 @@ export default function BetSizeSheet({
   presets: BetPreset[];
   ctx: PresetCtx;
   min: number;
+  /** bet/raise only: the most the seat can commit this street (= all-in). A
+   *  preset or custom value above this is clamped on submit, so a fat-finger
+   *  can't record more chips than the player physically has. */
+  max?: number;
   /** all-in only: pre-fill the seat's remaining stack. For bet/raise the
    *  sheet opens empty so presets are tap-first and the soft keyboard
    *  doesn't intercept the first tap. */
@@ -29,8 +34,14 @@ export default function BetSizeSheet({
   const [draft, setDraft] = useState(
     kind === "allin" && initial !== undefined ? String(initial) : ""
   );
+  const clampToMax = (v: number) => (max !== undefined ? Math.min(v, max) : v);
   const num = parseFloat(draft) || 0;
+  const submitNum = clampToMax(num);
   const valid = kind === "allin" ? num >= 1 : num >= min;
+  // Whether the entered amount meets-or-exceeds the seat's whole stack — it
+  // will be recorded as an all-in, so tell the user rather than silently
+  // shrinking their number.
+  const isAllInAmount = max !== undefined && num >= max;
   const title = kind === "raise" ? "Raise to" : kind === "bet" ? "Bet" : "All-in";
 
   return (
@@ -43,7 +54,9 @@ export default function BetSizeSheet({
         {kind !== "allin" && presets.length > 0 && (
           <div className="grid grid-cols-3 gap-2 mb-3">
             {presets.map((p, i) => {
-              const v = computePresetAmount(p, ctx);
+              const raw = computePresetAmount(p, ctx);
+              const v = clampToMax(raw);
+              const capped = max !== undefined && raw > max;
               return (
                 <button
                   key={`${p.label}-${i}`}
@@ -51,7 +64,10 @@ export default function BetSizeSheet({
                   className="py-2 bg-blue-500 rounded text-sm font-bold leading-tight"
                 >
                   <div>{p.label}</div>
-                  <div className="text-xs text-blue-100">{v}</div>
+                  <div className="text-xs text-blue-100">
+                    {v}
+                    {capped && " (all-in)"}
+                  </div>
                 </button>
               );
             })}
@@ -71,18 +87,22 @@ export default function BetSizeSheet({
           className="text-2xl font-mono"
         />
         {kind !== "allin" && (
-          <div className="text-[11px] text-neutral-500 mt-1">最低 {min}</div>
+          <div className="text-[11px] text-neutral-500 mt-1">
+            最低 {min}
+            {max !== undefined && ` ・ 最大 ${max}（オールイン）`}
+          </div>
         )}
         <div className="flex gap-2 mt-3">
           <button onClick={onCancel} className="flex-1 py-3 bg-neutral-800 rounded">
             Cancel
           </button>
           <button
-            onClick={() => onSubmit(num)}
+            onClick={() => onSubmit(submitNum)}
             disabled={!valid}
             className="flex-1 py-3 bg-emerald-600 rounded font-bold disabled:opacity-40"
           >
-            {title === "Raise to" ? "Raise" : title} {num || ""}
+            {isAllInAmount ? "All-in" : title === "Raise to" ? "Raise" : title}{" "}
+            {submitNum || ""}
           </button>
         </div>
       </div>

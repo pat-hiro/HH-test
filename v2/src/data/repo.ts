@@ -145,6 +145,43 @@ export const Actions = {
     await db.actions.bulkPut(built);
     return built;
   },
+  /**
+   * Append one action, assigning `order` atomically from the DB's current max
+   * INSIDE a transaction. Callers must NOT pass `order` — deriving it from a
+   * (possibly stale) liveQuery snapshot is what let two rapid taps collide on
+   * the same order and corrupt the replay. Dexie serializes rw transactions
+   * that share a table, so concurrent appends get sequential orders.
+   */
+  append: async (
+    data: Omit<Action, "id" | "updatedAt" | "deletedAt" | "order">
+  ): Promise<Action> =>
+    db.transaction("rw", db.actions, async () => {
+      const rows = await db.actions.where("handId").equals(data.handId).toArray();
+      const maxOrder = rows
+        .filter((r) => r.deletedAt === null)
+        .reduce((m, r) => Math.max(m, r.order), -1);
+      const row = newRow<Action>({ ...data, order: maxOrder + 1 });
+      await db.actions.put(row);
+      return row;
+    }),
+  /** Append several actions in one transaction, numbering them sequentially
+   *  from the current max order. Same atomicity guarantee as `append`. */
+  appendMany: async (
+    handId: string,
+    rows: Omit<Action, "id" | "updatedAt" | "deletedAt" | "order" | "handId">[]
+  ): Promise<Action[]> =>
+    db.transaction("rw", db.actions, async () => {
+      const existing = await db.actions.where("handId").equals(handId).toArray();
+      let next =
+        existing
+          .filter((r) => r.deletedAt === null)
+          .reduce((m, r) => Math.max(m, r.order), -1) + 1;
+      const built = rows.map((r) =>
+        newRow<Action>({ ...r, handId, order: next++ })
+      );
+      await db.actions.bulkPut(built);
+      return built;
+    }),
   remove: (id: string) => softDelete<Action>(db.actions, id),
   forHand: async (handId: string): Promise<Action[]> => {
     const rows = await db.actions.where("handId").equals(handId).toArray();

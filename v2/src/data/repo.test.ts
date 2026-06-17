@@ -156,6 +156,45 @@ describe("actions: order is contiguous, UNDO pops the last one", () => {
     const rest = await Actions.forHand(handId);
     expect(rest.map((a) => a.order)).toEqual([0, 1]);
   });
+
+  it("append assigns order from the DB max — concurrent appends never collide", async () => {
+    const handId = uuid();
+    // Fire several appends WITHOUT awaiting between them, the way two rapid
+    // taps would. Each must still get a distinct, sequential order.
+    await Promise.all([
+      Actions.append({ handId, street: "PF", seat: 4, type: "call", amount: 2, isAllIn: false }),
+      Actions.append({ handId, street: "PF", seat: 5, type: "call", amount: 2, isAllIn: false }),
+      Actions.append({ handId, street: "PF", seat: 6, type: "fold", amount: 0, isAllIn: false }),
+    ]);
+    const orders = (await Actions.forHand(handId)).map((a) => a.order);
+    expect(orders).toEqual([0, 1, 2]);
+    expect(new Set(orders).size).toBe(3); // no duplicates
+  });
+
+  it("append continues numbering after a popLast (undo) without reusing an order", async () => {
+    const handId = uuid();
+    await Actions.append({ handId, street: "PF", seat: 4, type: "raise", amount: 6, isAllIn: false });
+    await Actions.append({ handId, street: "PF", seat: 5, type: "fold", amount: 0, isAllIn: false });
+    await Actions.popLast(handId); // undo the fold (order 1, now tombstoned)
+    const next = await Actions.append({ handId, street: "PF", seat: 5, type: "call", amount: 6, isAllIn: false });
+    // max alive order was 0 after the pop, so the new action is 1 again — and
+    // forHand returns exactly the two alive rows in order.
+    expect(next.order).toBe(1);
+    expect((await Actions.forHand(handId)).map((a) => [a.seat, a.type])).toEqual([
+      [4, "raise"],
+      [5, "call"],
+    ]);
+  });
+
+  it("appendMany numbers a batch sequentially from the current max", async () => {
+    const handId = uuid();
+    await Actions.append({ handId, street: "PF", seat: 4, type: "raise", amount: 6, isAllIn: false });
+    await Actions.appendMany(handId, [
+      { street: "PF", seat: 5, type: "fold", amount: 0, isAllIn: false },
+      { street: "PF", seat: 6, type: "fold", amount: 0, isAllIn: false },
+    ]);
+    expect((await Actions.forHand(handId)).map((a) => a.order)).toEqual([0, 1, 2]);
+  });
 });
 
 describe("integration: stored hand drives the engine to the right state", () => {
