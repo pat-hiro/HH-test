@@ -10,6 +10,7 @@ import type { Action as EngineAction, Street } from "../../engine/types";
 import type { Action as StoredAction } from "../../data/types";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
+import PlayingCard from "../components/PlayingCard";
 import BoardCardSheet from "../components/BoardCardSheet";
 import BetSizeSheet from "../components/BetSizeSheet";
 import CardPickerSheet from "../components/CardPickerSheet";
@@ -297,8 +298,15 @@ export default function Hand() {
     if (state.currentSeat === null) return;
     if (state.currentSeat === seat) return;
     if (foldedSet.has(seat) || allInSet.has(seat)) return;
-    // generate fold/check moves until the action reaches `seat`
     if (!handId) return;
+    // Defensive: refuse to advance to a seat that the engine never sees (e.g.
+    // a freshly emptied chair that's no longer in the hand snapshot). Without
+    // this guard, the loop below would fold every remaining seat in pursuit
+    // of an unreachable target — which is what produced the
+    // "Unknown プレイヤーをタップしたらハンドが終了した" report.
+    if (!activeSeats.includes(seat)) return;
+
+    // Generate fold/check moves until the action reaches `seat`.
     const moves: Move[] = [];
     let cur = state.currentSeat;
     let work = [...engineActions];
@@ -316,6 +324,31 @@ export default function Hand() {
       if (nv.currentSeat === seat) break;
     }
     if (moves.length === 0) return;
+
+    // Look at the resulting engine state. If the auto-fold cascade ends the
+    // hand or never actually reaches the tapped seat, ask the user before
+    // committing — otherwise a single mis-tap silently terminates the hand.
+    const projected = computeState(setup, work);
+    const foldCount = moves.filter((m) => m.type === "fold").length;
+    const wouldEndHand =
+      projected.inHand.length <= 1 || projected.handComplete;
+    const targetReached = projected.currentSeat === seat;
+    if (wouldEndHand) {
+      if (
+        !confirm(
+          `このタップで ${foldCount} 人が fold してハンドが終了します。続行しますか？`
+        )
+      )
+        return;
+    } else if (!targetReached && foldCount >= 3) {
+      if (
+        !confirm(
+          `タップした席まで届かず、${foldCount} 人が fold します。続行しますか？`
+        )
+      )
+        return;
+    }
+
     const newRows: Omit<StoredAction, "id" | "updatedAt" | "deletedAt">[] = [];
     let baseOrder = stored.length;
     let progress = [...engineActions];
@@ -821,29 +854,82 @@ export default function Hand() {
               </div>
 
               {showdown && (
-                <div className="pt-1">
-                  <div className="text-xs text-neutral-400 mb-1">
-                    ショウダウンカード（任意）
+                <div className="pt-2 border-t border-neutral-800">
+                  <div className="text-xs font-semibold text-neutral-200 mb-1">
+                    各プレイヤーの公開カード
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="text-[10px] text-neutral-500 mb-2">
+                    ショウダウンで見えたカードをタップで入力（覚えていないところは空欄でOK）
+                  </div>
+                  <div className="space-y-2">
                     {survivors
                       .filter((s) => s !== heroSeat)
                       .map((s) => {
                         const snap = hand.seats.find((x) => x.seat === s);
                         const kc = knownCards[s];
+                        const pos = positions.get(s) ?? "";
                         return (
                           <button
                             key={s}
                             onClick={() => setKnownCardsSeat(s)}
-                            className="px-2 py-1 bg-neutral-800 rounded text-xs"
+                            className={`w-full flex items-center gap-3 rounded p-2 border ${
+                              kc
+                                ? "bg-neutral-900 border-emerald-700"
+                                : "bg-neutral-950/40 border-neutral-800"
+                            }`}
                           >
-                            S{s} {snap?.name ?? ""}:{" "}
-                            <span className="font-mono">
-                              {kc ? kc.join(" ") : "🂠🂠"}
-                            </span>
+                            <div className="flex gap-0.5">
+                              <PlayingCard
+                                card={kc?.[0] ?? null}
+                                size="sm"
+                                faceDown={!kc}
+                              />
+                              <PlayingCard
+                                card={kc?.[1] ?? null}
+                                size="sm"
+                                faceDown={!kc}
+                              />
+                            </div>
+                            <div className="flex-1 text-left">
+                              <div className="text-sm font-semibold">
+                                S{s}{" "}
+                                <span className="text-neutral-300 font-normal">
+                                  {snap?.name ?? ""}
+                                </span>
+                                {pos && (
+                                  <span className="text-[10px] text-neutral-500 ml-2">
+                                    {pos}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-neutral-400">
+                                {kc ? "カードを編集" : "タップで入力"}
+                              </div>
+                            </div>
+                            {kc && (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setKnownCards((prev) => {
+                                    const next = { ...prev };
+                                    delete next[s];
+                                    return next;
+                                  });
+                                }}
+                                className="text-rose-400 text-xs px-2"
+                                role="button"
+                              >
+                                ✕
+                              </div>
+                            )}
                           </button>
                         );
                       })}
+                    {survivors.filter((s) => s !== heroSeat).length === 0 && (
+                      <div className="text-xs text-neutral-500 text-center py-2">
+                        Hero 以外のショウダウン参加者がいません
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

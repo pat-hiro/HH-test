@@ -335,7 +335,7 @@ export default function Setup() {
         <button onClick={() => nav("/settings")} className="text-neutral-300 text-lg px-2" title="Settings">
           ⚙
         </button>
-        <div className="flex-1 text-center font-bold">Cash Setup</div>
+        <div className="flex-1 text-center font-bold">Session Setup</div>
         <button
           onClick={newSession}
           className="text-emerald-400 text-sm px-2"
@@ -357,7 +357,7 @@ export default function Setup() {
           totalSeats={session.seatCount}
           seats={seatsVM}
           pot={previewPot}
-          streetLabel={previewPot > 0 ? "次ハンド プリポット" : ""}
+          streetLabel=""
           board={[null, null, null, null, null]}
           aspectRatio="5/4"
           onTapSeat={onTapSeat}

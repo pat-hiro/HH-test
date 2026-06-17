@@ -22,19 +22,59 @@ export interface SeatVM {
 }
 
 /**
- * Pick a chip-face palette graduated by bet size: amber gets darker as the
- * bet grows from 1BB through 5BB, then stays at the max shade. Every chip
- * shares the same amber base so SB/BB/STR/POST/regular bets read as the same
- * family of objects on the felt — the size, not the colour, signals weight.
+ * Casino-style chip denominations, scaled to BB so the same palette works
+ * across stakes. Real cardrooms use distinct colours per denomination — those
+ * colours are far more readable at a glance than an amber-only gradient.
+ *
+ *   < 2 BB    white   (1 unit / small change)
+ *   2..5 BB   red     ($5 chip)
+ *   5..15 BB  green   ($25)
+ *   15..50 BB black   ($100)
+ *   50..200   purple  ($500)
+ *   >= 200 BB yellow  ($1000)
  */
-function chipFaceFor(amount: number, bb: number): string {
-  if (bb <= 0) return "from-amber-300 to-amber-500";
-  const ratio = Math.min(1, amount / (bb * 5));
-  if (ratio < 0.2) return "from-amber-200 to-amber-400";
-  if (ratio < 0.4) return "from-amber-300 to-amber-500";
-  if (ratio < 0.6) return "from-amber-400 to-amber-600";
-  if (ratio < 0.8) return "from-amber-500 to-amber-700";
-  return "from-amber-600 to-amber-800";
+interface ChipPalette {
+  face: string; // gradient from/to for the chip body
+  edge: string; // border tint
+  label: string; // text color for the amount
+}
+function chipPaletteFor(amount: number, bb: number): ChipPalette {
+  const ratio = bb > 0 ? amount / bb : 0;
+  if (ratio < 2)
+    return {
+      face: "from-neutral-100 to-neutral-300",
+      edge: "border-neutral-400",
+      label: "text-neutral-900",
+    };
+  if (ratio < 5)
+    return {
+      face: "from-rose-500 to-rose-700",
+      edge: "border-rose-300",
+      label: "text-white",
+    };
+  if (ratio < 15)
+    return {
+      face: "from-emerald-500 to-emerald-700",
+      edge: "border-emerald-300",
+      label: "text-white",
+    };
+  if (ratio < 50)
+    return {
+      face: "from-neutral-800 to-neutral-950",
+      edge: "border-neutral-500",
+      label: "text-white",
+    };
+  if (ratio < 200)
+    return {
+      face: "from-purple-500 to-purple-700",
+      edge: "border-purple-300",
+      label: "text-white",
+    };
+  return {
+    face: "from-yellow-300 to-amber-500",
+    edge: "border-yellow-200",
+    label: "text-neutral-900",
+  };
 }
 
 /** A poker-chip-styled bet marker. */
@@ -47,7 +87,7 @@ function Chip({
   kind?: SeatVM["blind"];
   bb: number;
 }) {
-  const face = chipFaceFor(amount, bb);
+  const palette = chipPaletteFor(amount, bb);
   const label =
     kind === "sb"
       ? "SB"
@@ -61,13 +101,15 @@ function Chip({
   return (
     <div className="flex items-center gap-1 bg-neutral-900/85 rounded-full pl-0.5 pr-2 py-0.5 shadow-lg">
       <div
-        className={`w-5 h-5 rounded-full bg-gradient-to-b ${face} border border-white/70 shadow-inner flex items-center justify-center`}
+        className={`w-5 h-5 rounded-full bg-gradient-to-b ${palette.face} border-2 ${palette.edge} shadow-inner flex items-center justify-center`}
         style={{
           backgroundImage:
             "repeating-conic-gradient(rgba(255,255,255,0.55) 0deg 12deg, transparent 12deg 30deg)",
         }}
       >
-        <div className={`w-3 h-3 rounded-full bg-gradient-to-b ${face} border border-white/60`} />
+        <div
+          className={`w-3 h-3 rounded-full bg-gradient-to-b ${palette.face} border ${palette.edge}`}
+        />
       </div>
       <span className="text-[11px] font-bold text-yellow-200 leading-none">
         {label && <span className="text-[8px] text-neutral-300 mr-0.5">{label}</span>}

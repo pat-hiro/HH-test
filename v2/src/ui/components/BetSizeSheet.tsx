@@ -16,13 +16,21 @@ export default function BetSizeSheet({
   presets: BetPreset[];
   ctx: PresetCtx;
   min: number;
+  /** all-in only: pre-fill the seat's remaining stack. For bet/raise the
+   *  sheet opens empty so presets are tap-first and the soft keyboard
+   *  doesn't intercept the first tap. */
   initial?: number;
   onCancel: () => void;
   onSubmit: (amount: number) => void;
 }) {
-  const [draft, setDraft] = useState(String(initial ?? min ?? ""));
+  // For bet/raise we start with an empty input so the user can tap a preset
+  // (or, less commonly, type a custom). For all-in we pre-fill the remaining
+  // stack so a single confirm shoves.
+  const [draft, setDraft] = useState(
+    kind === "allin" && initial !== undefined ? String(initial) : ""
+  );
   const num = parseFloat(draft) || 0;
-  const valid = num >= min;
+  const valid = kind === "allin" ? num >= 1 : num >= min;
   const title = kind === "raise" ? "Raise to" : kind === "bet" ? "Bet" : "All-in";
 
   return (
@@ -49,16 +57,22 @@ export default function BetSizeSheet({
             })}
           </div>
         )}
+        {/* No autoFocus — the soft keyboard otherwise pops up over the preset
+            buttons and the first tap gets swallowed by the focus/select
+            handler instead of registering on the preset. The user can tap
+            the input explicitly when they want to type a custom amount. */}
         <input
           type="number"
           inputMode="decimal"
           onFocus={(e) => e.currentTarget.select()}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          placeholder={kind === "allin" ? "" : `カスタム (最低 ${min})`}
           className="text-2xl font-mono"
-          autoFocus
         />
-        <div className="text-[11px] text-neutral-500 mt-1">最低 {min}</div>
+        {kind !== "allin" && (
+          <div className="text-[11px] text-neutral-500 mt-1">最低 {min}</div>
+        )}
         <div className="flex gap-2 mt-3">
           <button onClick={onCancel} className="flex-1 py-3 bg-neutral-800 rounded">
             Cancel
