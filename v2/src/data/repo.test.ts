@@ -270,13 +270,25 @@ describe("bankroll + settings", () => {
     expect(list.length).toBe(1);
   });
 
-  it("Settings.get lazily creates a singleton with default presets", async () => {
+  it("Settings.get is read-only (no write inside the call) so it's safe inside useLiveQuery", async () => {
+    const { db } = await import("./db");
+    // Confirm the row truly does not exist before the call.
+    expect(await db.settings.get("singleton")).toBeUndefined();
     const s = await Settings.get();
     expect(s.id).toBe("singleton");
     expect(s.baseCurrency).toBe("JPY");
     expect(s.pfRaise.length).toBeGreaterThan(0);
-    const s2 = await Settings.get();
-    expect(s2.id).toBe(s.id); // same singleton
+    // The defaults are returned, NOT persisted. This was the root cause of
+    // the "Readwrite transaction in liveQuery context" crash from screen 4.
+    expect(await db.settings.get("singleton")).toBeUndefined();
+  });
+
+  it("Settings.update persists (lazily creating the singleton)", async () => {
+    const { db } = await import("./db");
+    const updated = await Settings.update({ baseCurrency: "USD" });
+    expect(updated.baseCurrency).toBe("USD");
+    const stored = await db.settings.get("singleton");
+    expect(stored?.baseCurrency).toBe("USD");
   });
 });
 

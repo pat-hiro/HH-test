@@ -226,23 +226,31 @@ const DEFAULT_PRESETS: {
   ],
 };
 
+/** Read-only — safe to call inside useLiveQuery. Returns defaults if the
+ * singleton hasn't been persisted yet; persistence happens lazily on the
+ * first call to Settings.update(). */
 export const Settings = {
   get: async (): Promise<AppSettings> => {
     const existing = await db.settings.get(SETTINGS_ID);
     if (existing) return existing;
-    const fresh: AppSettings = {
+    return {
       id: SETTINGS_ID,
-      updatedAt: now(),
+      updatedAt: 0,
       deletedAt: null,
       baseCurrency: "JPY",
       ...DEFAULT_PRESETS,
     };
-    await db.settings.put(fresh);
-    return fresh;
   },
   update: async (patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> => {
-    const current = await Settings.get();
-    const next = { ...current, ...patch, updatedAt: now() };
+    const existing = await db.settings.get(SETTINGS_ID);
+    const base: AppSettings = existing ?? {
+      id: SETTINGS_ID,
+      updatedAt: 0,
+      deletedAt: null,
+      baseCurrency: "JPY",
+      ...DEFAULT_PRESETS,
+    };
+    const next = { ...base, ...patch, updatedAt: now() };
     await db.settings.put(next);
     return next;
   },
