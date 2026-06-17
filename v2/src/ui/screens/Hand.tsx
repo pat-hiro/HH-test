@@ -133,7 +133,26 @@ export default function Hand() {
     }
   }, [hand, state, boardSheetSlot, pending]);
 
-  if (!session || !hand || !setup || !state || !settings) return null;
+  if (!session || !hand || !setup || !state || !settings) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center text-neutral-500 gap-3 text-sm">
+        <div>Loading hand…</div>
+        {handId && !hand && (
+          <div className="text-xs text-rose-400 text-center px-6">
+            ハンドが見つかりません。
+            <br />
+            URL: /sessions/{sessionId}/hands/{handId}
+          </div>
+        )}
+        <button
+          onClick={() => nav(sessionId ? `/sessions/${sessionId}/setup` : "/")}
+          className="mt-2 px-4 py-2 bg-neutral-800 rounded"
+        >
+          Setup に戻る
+        </button>
+      </div>
+    );
+  }
 
   // ----- VM (read-only) ------------------------------------------------------
 

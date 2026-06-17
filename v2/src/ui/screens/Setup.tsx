@@ -75,7 +75,13 @@ export default function Setup() {
     [activeSeats, session?.buttonSeat]
   );
 
-  if (!session || !roster) return null;
+  if (!session || !roster) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-neutral-500 text-sm">
+        Loading session…
+      </div>
+    );
+  }
 
   // ----- VM ----------------------------------------------------------------
 
