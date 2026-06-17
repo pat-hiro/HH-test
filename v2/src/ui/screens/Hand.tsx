@@ -433,6 +433,29 @@ export default function Hand() {
     await Actions.popLast(handId);
   };
 
+  /** Undo every action on the current street + clear the board cards that
+   *  street introduced. Handy when the user goes "no wait, that whole flop
+   *  was different" and wants a single tap to back out the street. */
+  const undoStreet = async () => {
+    if (!handId || !state) return;
+    const cur = state.street;
+    const ofStreet = stored.filter((a) => a.street === cur);
+    for (const a of ofStreet) await Actions.remove(a.id);
+    if (cur === "F") {
+      await Hands.update(hand.id, {
+        board: { ...hand.board, flop: null, turn: null, river: null },
+      });
+    } else if (cur === "T") {
+      await Hands.update(hand.id, {
+        board: { ...hand.board, turn: null, river: null },
+      });
+    } else if (cur === "R") {
+      await Hands.update(hand.id, { board: { ...hand.board, river: null } });
+    }
+    // also wipe the auto-prompt memo so the next visit re-prompts cleanly
+    promptedRef.current[cur] = false;
+  };
+
   const saveHeroCards = async (cards: (string | null)[]) => {
     const c0 = cards[0];
     const c1 = cards[1];
@@ -495,32 +518,40 @@ export default function Hand() {
   };
 
   const foldAll = async () => {
-    if (!handId || state.currentSeat === null) return;
-    // fold every still-acting seat except Hero (or the current actor if Hero is gone)
-    const surviving = state.inHand.filter((s) => !allInSet.has(s));
-    const keep =
-      heroSeat !== null && surviving.includes(heroSeat) ? heroSeat : state.currentSeat;
-    const baseOrder = stored.length;
-    const rows = surviving
-      .filter((s) => s !== keep)
-      .map((s, i) => ({
-        handId,
-        order: baseOrder + i,
-        street: state.street,
-        seat: s,
-        type: "fold" as const,
-        amount: 0,
-        isAllIn: false,
-      }));
-    if (rows.length > 0) await Actions.bulkCreate(rows);
+    if (!handId) return;
+    // Fold every seat that still OWES chips on this street (live < currentBet).
+    // Seats that already matched the current bet — callers, the bettor /
+    // raiser, BB option in a limped pot, anyone who said "call" — stay in the
+    // hand. So a bet+call followed by Fold All correctly leaves the bettor
+    // and caller to see the next street. Already all-in seats stay in too.
+    const toFold = state.inHand.filter((s) => {
+      if (allInSet.has(s)) return false;
+      const live = state.liveThisStreet[s] ?? 0;
+      return live < state.currentBet;
+    });
+    if (toFold.length === 0) return;
+    let order = stored.length;
+    const rows = toFold.map((s) => ({
+      handId,
+      order: order++,
+      street: state.street,
+      seat: s,
+      type: "fold" as const,
+      amount: 0,
+      isAllIn: false,
+    }));
+    await Actions.bulkCreate(rows);
   };
 
   // Postflop "Check Thru" — emit a CHECK action for every remaining seat
   // until the street closes. Used by the user when nobody bet (or after a
   // bet that everyone called) to fast-forward straight to the next street.
   // Stops if anyone faces a non-zero toCall (i.e. nothing-to-check).
+  /** Check the rest of the way around THIS street only — don't bleed into
+   *  the next street even if the engine would advance. */
   const checkThru = async () => {
-    if (!handId) return;
+    if (!handId || !state) return;
+    const startStreet = state.street;
     let work = [...engineActions];
     let baseOrder = stored.length;
     const newRows: Omit<StoredAction, "id" | "updatedAt" | "deletedAt">[] = [];
@@ -528,6 +559,7 @@ export default function Hand() {
     while (safety-- > 0) {
       const st = computeState(setup, work);
       if (st.currentSeat === null) break;
+      if (st.street !== startStreet) break; // don't carry into the next street
       if (st.toCall > 0) break; // someone has to call — abort
       const ea = moveToAction(setup, work, { seat: st.currentSeat, type: "check" });
       newRows.push({
@@ -639,7 +671,8 @@ export default function Hand() {
     <div className="min-h-screen flex flex-col">
       <div className="flex items-center px-3 py-2 border-b border-neutral-800">
         <button onClick={() => nav(`/sessions/${session.id}/setup`)} className="text-emerald-400 text-lg">‹</button>
-        <button onClick={undo} className="ml-3 text-rose-400 text-lg">↻</button>
+        <button onClick={undoStreet} title="1ストリート戻す" className="ml-2 text-rose-400 text-lg">⏮</button>
+        <button onClick={undo} title="1アクション戻す" className="ml-1 text-rose-400 text-lg">↶</button>
         <div className="flex-1 text-center font-bold tracking-wider">{streetTitle(state.street)}</div>
         <button onClick={() => nav("/settings")} className="text-neutral-300 text-sm px-2">⚙</button>
         <div className="text-xs text-neutral-500">#{hand.handNo}</div>

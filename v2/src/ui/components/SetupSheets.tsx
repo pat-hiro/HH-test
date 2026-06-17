@@ -341,8 +341,8 @@ export function EditTableSheet({
   suggestions,
   onClose,
   onUpdate,
-  onAdd,
-  onRemove,
+  onEmpty,
+  onSwap,
 }: {
   players: SessionPlayer[];
   buttonSeat: number | null;
@@ -350,9 +350,21 @@ export function EditTableSheet({
   suggestions: string[];
   onClose: () => void;
   onUpdate: (seat: number, patch: Partial<SessionPlayer>) => Promise<void>;
-  onAdd: () => Promise<void>;
-  onRemove: () => Promise<void>;
+  /** Reset a seat to empty (name="", stack=null, Sit-out cleared). The seat
+   *  slot itself stays — empty chairs around a cardroom table that can be
+   *  filled when a new player arrives. */
+  onEmpty: (seat: number) => Promise<void>;
+  /** Swap every per-player field (name, stack, Hero, post flags, etc.) between
+   *  two seats so a player can move chairs without losing their state. */
+  onSwap: (seatA: number, seatB: number) => Promise<void>;
 }) {
+  const [swapFrom, setSwapFrom] = useState<number | null>(null);
+  const tapRow = async (seat: number) => {
+    if (swapFrom === null) return;
+    if (swapFrom !== seat) await onSwap(swapFrom, seat);
+    setSwapFrom(null);
+  };
+
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onClose}>
       <div
@@ -364,24 +376,43 @@ export function EditTableSheet({
           <div className="text-sm font-bold">Edit Poker Table</div>
           <div className="w-8" />
         </div>
-        <div className="grid grid-cols-[80px_50px_1fr_60px] gap-2 text-xs text-neutral-400 border-b border-neutral-800 pb-1 mb-2">
+        {swapFrom !== null && (
+          <div className="bg-amber-900/40 border border-amber-700 rounded p-2 mb-2 text-xs text-center">
+            S{swapFrom} の入れ替え先をタップ
+            <button
+              onClick={() => setSwapFrom(null)}
+              className="ml-2 underline text-amber-300"
+            >
+              キャンセル
+            </button>
+          </div>
+        )}
+        <div className="grid grid-cols-[28px_72px_44px_1fr_28px_28px] gap-1 text-[10px] text-neutral-400 border-b border-neutral-800 pb-1 mb-2">
+          <div>S</div>
           <div>Stack</div>
           <div>Pos</div>
           <div>Name</div>
-          <div className="text-center">Sit in</div>
+          <div className="text-center">↕</div>
+          <div className="text-center">⌫</div>
         </div>
         {players.map((p) => {
           const pos = positions.get(p.seat) ?? "";
           const isBtn = p.seat === buttonSeat;
+          const isSwapSrc = swapFrom === p.seat;
           return (
             <div
               key={p.seat}
-              className="grid grid-cols-[80px_50px_1fr_60px] gap-2 items-center py-2 border-b border-neutral-800"
+              onClick={() => tapRow(p.seat)}
+              className={`grid grid-cols-[28px_72px_44px_1fr_28px_28px] gap-1 items-center py-2 border-b border-neutral-800 ${
+                swapFrom !== null && !isSwapSrc ? "bg-amber-900/10" : ""
+              } ${isSwapSrc ? "bg-amber-900/40" : ""}`}
             >
+              <div className="text-xs font-mono text-neutral-400">{p.seat}</div>
               <input
                 type="number"
                 inputMode="decimal"
                 onFocus={(e) => e.currentTarget.select()}
+                onClick={(e) => e.stopPropagation()}
                 value={p.stack ?? ""}
                 placeholder="0"
                 onChange={(e) =>
@@ -391,41 +422,42 @@ export function EditTableSheet({
                 }
                 className="text-sm py-1"
               />
-              <div className="text-sm font-bold">{isBtn ? "BTN" : pos || "—"}</div>
-              <NamePicker
-                value={p.name}
-                suggestions={suggestions}
-                onChange={(name) => onUpdate(p.seat, { name })}
-                className="text-left text-sm bg-neutral-800 rounded px-2 py-1.5"
-              />
-              <button
-                onClick={() => onUpdate(p.seat, { isAway: !p.isAway })}
-                className={`mx-auto block w-10 h-6 rounded-full ${!p.isAway ? "bg-emerald-500" : "bg-neutral-700"}`}
-              >
-                <span
-                  className={`block w-5 h-5 bg-white rounded-full transition-transform ${!p.isAway ? "translate-x-5" : "translate-x-0.5"}`}
+              <div className="text-xs font-bold">{isBtn ? "BTN" : pos || "—"}</div>
+              <div onClick={(e) => e.stopPropagation()}>
+                <NamePicker
+                  value={p.name}
+                  suggestions={suggestions}
+                  onChange={(name) => onUpdate(p.seat, { name })}
+                  className="text-left text-sm bg-neutral-800 rounded px-2 py-1.5 w-full block"
                 />
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSwapFrom(swapFrom === p.seat ? null : p.seat);
+                }}
+                className={`mx-auto block w-7 h-7 rounded ${isSwapSrc ? "bg-amber-500" : "bg-neutral-800"}`}
+                title="入れ替え"
+              >
+                ↕
+              </button>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (!confirm(`S${p.seat} を空席にしますか？`)) return;
+                  await onEmpty(p.seat);
+                }}
+                className="mx-auto block w-7 h-7 rounded bg-neutral-800 text-rose-400"
+                title="空席にする"
+              >
+                ⌫
               </button>
             </div>
           );
         })}
 
-        <div className="text-center text-sm mt-3">Current # Seats: {players.length}</div>
-        <div className="grid grid-cols-2 gap-2 mt-3">
-          <button
-            onClick={onRemove}
-            disabled={players.length <= 2}
-            className="py-3 border border-rose-500 text-rose-500 rounded font-bold disabled:opacity-40"
-          >
-            Remove Seat
-          </button>
-          <button
-            onClick={onAdd}
-            disabled={players.length >= 11}
-            className="py-3 border border-blue-500 text-blue-500 rounded font-bold disabled:opacity-40"
-          >
-            Add Seat
-          </button>
+        <div className="text-center text-[11px] mt-3 text-neutral-500">
+          総席数 {players.length}。座席は固定で、椅子だけ空席にできます。新しい人が来たら名前を入れれば登録完了。
         </div>
       </div>
     </div>

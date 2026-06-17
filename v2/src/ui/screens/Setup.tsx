@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../data/db";
 import { Hands, Players, Sessions, Settings } from "../../data/repo";
-import { nextActive } from "../../engine/setup";
+import { bbSeat, nextActive, sbSeat } from "../../engine/setup";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
 import {
@@ -128,6 +128,29 @@ export default function Setup() {
 
   // ----- VM ----------------------------------------------------------------
 
+  // Preview of where the forced bets will land on the next hand, so the user
+  // can verify SB / BB / straddle / ante BEFORE pressing Start Hand. Needs
+  // BTN assigned + ≥2 active seats; else falls back to no chips on the felt.
+  const previewSb =
+    session.buttonSeat !== null
+      ? sbSeat(session.buttonSeat, session.seatCount, activeSeats)
+      : null;
+  const previewBb =
+    session.buttonSeat !== null
+      ? bbSeat(session.buttonSeat, session.seatCount, activeSeats)
+      : null;
+  const previewUtg =
+    previewBb !== null
+      ? nextActive(previewBb, session.seatCount, activeSeats)
+      : null;
+  const previewPot =
+    (previewSb !== null ? session.sb : 0) +
+    (previewBb !== null ? session.bb : 0) +
+    (session.autoStraddle && previewUtg !== null
+      ? (session.straddleAmount > 0 ? session.straddleAmount : session.bb * 2)
+      : 0) +
+    (previewBb !== null ? session.ante : 0);
+
   const seatsVM: SeatVM[] = roster.map((p) => ({
     seat: p.seat,
     position: positions.get(p.seat) ?? "",
@@ -139,7 +162,25 @@ export default function Setup() {
     isFolded: p.isAway,
     isAllIn: false,
     cards: null,
-    liveBet: 0,
+    liveBet:
+      p.seat === previewSb
+        ? session.sb
+        : p.seat === previewBb
+          ? session.bb
+          : session.autoStraddle && p.seat === previewUtg
+            ? session.straddleAmount > 0
+              ? session.straddleAmount
+              : session.bb * 2
+            : 0,
+    blind:
+      p.seat === previewSb
+        ? "sb"
+        : p.seat === previewBb
+          ? "bb"
+          : session.autoStraddle && p.seat === previewUtg
+            ? "straddle"
+            : null,
+    ante: session.ante > 0 && p.seat === previewBb ? session.ante : 0,
   }));
 
   // ----- handlers ----------------------------------------------------------
@@ -315,8 +356,8 @@ export default function Setup() {
         <PokerTable
           totalSeats={session.seatCount}
           seats={seatsVM}
-          pot={0}
-          streetLabel=""
+          pot={previewPot}
+          streetLabel={previewPot > 0 ? "次ハンド プリポット" : ""}
           board={[null, null, null, null, null]}
           aspectRatio="5/4"
           onTapSeat={onTapSeat}
@@ -606,31 +647,51 @@ export default function Setup() {
             const p = roster.find((x) => x.seat === seat);
             if (p) await Players.update(p.id, patch);
           }}
-          onAdd={async () => {
-            const max = roster.length > 0 ? Math.max(...roster.map((p) => p.seat)) : 0;
-            if (max >= 11) return;
-            await Players.create({
-              sessionId: session.id,
-              seat: max + 1,
-              name: "Unknown",
+          onEmpty={async (seat) => {
+            const p = roster.find((x) => x.seat === seat);
+            if (!p) return;
+            await Players.update(p.id, {
+              name: "",
+              stack: null,
               isHero: false,
               isAway: false,
               mustPostBB: false,
               postWithAnte: false,
-              stack: 200,
-              note: "",
             });
-            await Sessions.update(session.id, { seatCount: max + 1 });
+            if (session.heroSeat === seat)
+              await Sessions.update(session.id, { heroSeat: null });
+            if (session.buttonSeat === seat)
+              await Sessions.update(session.id, { buttonSeat: null });
           }}
-          onRemove={async () => {
-            if (roster.length <= 2) return;
-            const last = roster[roster.length - 1];
-            await Players.remove(last.id);
-            await Sessions.update(session.id, {
-              seatCount: roster.length - 1,
-              ...(last.isHero ? { heroSeat: null } : {}),
-              ...(last.seat === session.buttonSeat ? { buttonSeat: null } : {}),
+          onSwap={async (a, b) => {
+            const pa = roster.find((x) => x.seat === a);
+            const pb = roster.find((x) => x.seat === b);
+            if (!pa || !pb) return;
+            // Swap every per-player field except seat + sessionId so the
+            // player carries their name, stack, Hero flag, posts, note, etc.
+            // to their new chair. Hero/BTN session pointers follow.
+            await Players.update(pa.id, {
+              name: pb.name,
+              stack: pb.stack,
+              isHero: pb.isHero,
+              isAway: pb.isAway,
+              mustPostBB: pb.mustPostBB,
+              postWithAnte: pb.postWithAnte,
+              note: pb.note,
             });
+            await Players.update(pb.id, {
+              name: pa.name,
+              stack: pa.stack,
+              isHero: pa.isHero,
+              isAway: pa.isAway,
+              mustPostBB: pa.mustPostBB,
+              postWithAnte: pa.postWithAnte,
+              note: pa.note,
+            });
+            if (session.heroSeat === a)
+              await Sessions.update(session.id, { heroSeat: b });
+            else if (session.heroSeat === b)
+              await Sessions.update(session.id, { heroSeat: a });
           }}
         />
       )}

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import PlayingCard from "./PlayingCard";
-import { seatXY } from "../positions";
+import { dealerXY, seatXY } from "../positions";
 import { fmtChips } from "../fmt";
 
 export interface SeatVM {
@@ -102,6 +102,28 @@ export default function PokerTable({
   return (
     <div className="relative w-full max-h-[60vh]" style={{ aspectRatio }}>
       <div className="absolute inset-x-2 top-[12%] bottom-[12%] rounded-[50%] bg-gradient-to-b from-felt-700 to-felt-900 border-[6px] border-neutral-900 shadow-inner" />
+
+      {/* Dealer marker — fixed top-centre of the oval. */}
+      {(() => {
+        const dx = dealerXY();
+        return (
+          <div
+            className="absolute z-10 pointer-events-none flex flex-col items-center"
+            style={{
+              left: `${dx.x}%`,
+              top: `${dx.y}%`,
+              transform: "translate(-50%, -50%)",
+            }}
+          >
+            <div className="w-9 h-9 rounded-full bg-gradient-to-b from-neutral-200 to-neutral-400 border-2 border-neutral-600 shadow-lg flex items-center justify-center">
+              <span className="text-xs font-black text-neutral-800">DLR</span>
+            </div>
+            <div className="text-[8px] text-neutral-400 mt-0.5 tracking-wider">
+              DEALER
+            </div>
+          </div>
+        );
+      })()}
 
       {/* center: pot + board */}
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">

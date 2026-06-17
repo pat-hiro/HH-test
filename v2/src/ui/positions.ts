@@ -29,9 +29,20 @@ export function positionLabels(
 }
 
 export function seatXY(seat: number, total: number): { x: number; y: number } {
-  const angle = ((seat - 1) * (360 / total) - 90) * (Math.PI / 180);
+  // Cardroom convention: the dealer occupies the top-centre slot, and seat
+  // numbering starts to the dealer's RIGHT (= top-right area) and runs
+  // clockwise around the table. We treat the dealer + N seats as (N+1)
+  // evenly-spaced slots around the oval. Slot 0 is the dealer; slot k (= seat
+  // k) is at angle -90° + k * (360 / (N+1)).
+  const slots = total + 1;
+  const angle = (seat * (360 / slots) - 90) * (Math.PI / 180);
   return {
     x: 50 + 42 * Math.cos(angle),
     y: 50 + 38 * Math.sin(angle),
   };
+}
+
+/** Position of the dealer marker — always top centre of the oval. */
+export function dealerXY(): { x: number; y: number } {
+  return { x: 50, y: 50 - 38 };
 }
