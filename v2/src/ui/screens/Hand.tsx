@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../data/db";
-import { Actions, Hands, Players, Sessions, Settings } from "../../data/repo";
+import { Actions, Events, Hands, Players, Sessions, Settings } from "../../data/repo";
 import { makeSetup, nextActive } from "../../engine/setup";
 import { computeState, moveToAction } from "../../engine/reducer";
 import type { Move } from "../../engine/reducer";
@@ -14,6 +14,7 @@ import BoardCardSheet from "../components/BoardCardSheet";
 import BetSizeSheet from "../components/BetSizeSheet";
 import CardPickerSheet from "../components/CardPickerSheet";
 import NoteSheet from "../components/NoteSheet";
+import EventSheet from "../components/EventSheet";
 import { positionLabels } from "../positions";
 
 // ----- helpers --------------------------------------------------------------
@@ -65,7 +66,9 @@ function useEngineState(handId: string | undefined) {
     );
     return makeSetup({
       seats: hand.seats.map((s) => ({ seat: s.seat, startStack: s.startStack })),
-      seatCount: 11, // for rotation logic — actual seats are in hand.seats
+      // upper bound for the modular rotation: max seat NUMBER actually present
+      // in the hand (since unnamed seats are excluded from the snapshot)
+      seatCount: Math.max(...hand.seats.map((s) => s.seat), 2),
       buttonSeat: hand.buttonSeat,
       sb: hand.sb,
       bb: hand.bb,
@@ -106,6 +109,10 @@ export default function Hand() {
     [sessionId]
   );
   const settings = useLiveQuery(() => Settings.get(), []);
+  const handEvents = useLiveQuery(
+    () => (handId ? Events.forHand(handId) : []),
+    [handId]
+  );
   const { hand, stored, setup, engineActions, state } = useEngineState(handId);
 
   const [pending, setPending] = useState<null | "BET" | "RAISE" | "ALL_IN">(null);
@@ -113,6 +120,7 @@ export default function Hand() {
   const [boardSheetSlot, setBoardSheetSlot] = useState<number | null>(null);
   const [heroCardsOpen, setHeroCardsOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
+  const [eventOpen, setEventOpen] = useState(false);
   const [knownCardsSeat, setKnownCardsSeat] = useState<number | null>(null);
 
   // result-entry state, seeded once when the hand becomes complete
@@ -618,6 +626,13 @@ export default function Hand() {
         >
           ✎ メモ{hand.note ? " ●" : ""}
         </button>
+        <button
+          onClick={() => setEventOpen(true)}
+          className={`flex-1 py-2 rounded text-sm ${(handEvents?.length ?? 0) > 0 ? "bg-purple-900/50 border border-purple-700" : "bg-neutral-800"}`}
+        >
+          ⚑ Event
+          {(handEvents?.length ?? 0) > 0 ? ` ${handEvents!.length}` : ""}
+        </button>
       </div>
 
       <div className="flex-1 p-3 space-y-2">
@@ -886,6 +901,26 @@ export default function Hand() {
           initial={hand.note}
           onCancel={() => setNoteOpen(false)}
           onSave={saveNote}
+        />
+      )}
+
+      {eventOpen && handId && (
+        <EventSheet
+          seats={hand.seats.map((s) => ({ seat: s.seat, name: s.name }))}
+          defaultStreet={state.street}
+          onCancel={() => setEventOpen(false)}
+          onSave={async (e) => {
+            await Events.create({
+              handId,
+              street: e.street,
+              type: e.type,
+              seat: e.seat,
+              cards: e.cards,
+              note: e.note,
+              resolution: e.resolution,
+            });
+            setEventOpen(false);
+          }}
         />
       )}
     </div>
