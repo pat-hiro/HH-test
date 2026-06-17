@@ -146,6 +146,49 @@ export default function Setup() {
     session.buttonSeat !== null &&
     activeSeats.length >= 2;
 
+  // Start a brand-new session, cloning the current stakes/seat config so the
+  // common case (same game, new sit-down) is one tap. Roster resets to Unknown.
+  const newSession = async () => {
+    if (!session) return;
+    const now = Date.now();
+    const seatCount = session.seatCount;
+    const created = await Sessions.create({
+      date: new Date().toISOString().slice(0, 10),
+      startedAt: now,
+      endedAt: null,
+      casino: session.casino,
+      location: session.location,
+      gameType: session.gameType,
+      gameOther: session.gameOther,
+      sb: session.sb,
+      bb: session.bb,
+      ante: session.ante,
+      autoStraddle: session.autoStraddle,
+      straddleAmount: session.straddleAmount,
+      currency: session.currency,
+      exchangeRate: session.exchangeRate,
+      seatCount,
+      rake: session.rake,
+      heroSeat: null,
+      buttonSeat: null,
+      note: "",
+    });
+    for (let i = 1; i <= seatCount; i++) {
+      await Players.create({
+        sessionId: created.id,
+        seat: i,
+        name: "Unknown",
+        isHero: false,
+        isAway: false,
+        mustPostBB: false,
+        postWithAnte: false,
+        stack: 200,
+        note: "",
+      });
+    }
+    nav(`/sessions/${created.id}/setup`);
+  };
+
   const startHand = async () => {
     if (!ready) return;
     const prev = await Hands.lastForSession(session.id);
@@ -206,6 +249,13 @@ export default function Setup() {
           ⚙
         </button>
         <div className="flex-1 text-center font-bold">Cash Setup</div>
+        <button
+          onClick={newSession}
+          className="text-emerald-400 text-sm px-2"
+          title="新規セッション"
+        >
+          ＋新規
+        </button>
         <button
           onClick={() => setShowEditTable(true)}
           className="text-emerald-400 text-lg px-2"

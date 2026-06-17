@@ -121,23 +121,39 @@ export default function Hand() {
   const [shares, setShares] = useState<Record<number, string>>({});
   const [knownCards, setKnownCards] = useState<Record<number, [string, string]>>({});
 
-  // Determine what board input is required to enter the current engine street.
-  // Returns the slots that MUST be filled before action can resume, or null if
-  // the board is already adequate for the engine's current street.
+  // Board / completion logic. Three situations:
+  //  - handFoldedOut: only one player left → result, no board needed.
+  //  - betting still open (currentSeat set): require the CURRENT street's
+  //    board cards before action can resume.
+  //  - betting done but ≥2 players remain (showdown or all-in run-out):
+  //    the full board must be dealt before we record the result.
+  const handFoldedOut = !!state && state.inHand.length <= 1;
+  const bettingDone = !!state && state.currentSeat === null;
+
   const boardRequirement = (() => {
     if (!hand || !state) return null;
-    if (state.handComplete) return null;
-    if (state.street === "F" && !hand.board.flop) {
-      return { slots: [0, 1, 2], startSlot: 0 };
+    if (handFoldedOut) return null;
+    const haveFlop = !!hand.board.flop;
+    const haveTurn = !!hand.board.turn;
+    const haveRiver = !!hand.board.river;
+    if (!bettingDone) {
+      // normal in-street board requirement
+      if (state.street === "F" && !haveFlop) return { slots: [0, 1, 2], startSlot: 0 };
+      if (state.street === "T" && !haveTurn) return { slots: [3], startSlot: 3 };
+      if (state.street === "R" && !haveRiver) return { slots: [4], startSlot: 4 };
+      return null;
     }
-    if (state.street === "T" && !hand.board.turn) {
-      return { slots: [3], startSlot: 3 };
-    }
-    if (state.street === "R" && !hand.board.river) {
-      return { slots: [4], startSlot: 4 };
-    }
+    // betting done, multiway → deal the rest of the board (run-out / showdown)
+    if (!haveFlop) return { slots: [0, 1, 2], startSlot: 0 };
+    if (!haveTurn) return { slots: [3], startSlot: 3 };
+    if (!haveRiver) return { slots: [4], startSlot: 4 };
     return null;
   })();
+
+  // Show the result panel only once betting is done AND any required run-out
+  // board has been entered (or the hand folded out).
+  const showResult =
+    !!state && (handFoldedOut || (bettingDone && boardRequirement === null));
 
   // auto-open the board picker the moment the engine advances past the board,
   // and never auto-dismiss it: input is required for the new street.
@@ -148,10 +164,10 @@ export default function Hand() {
     setBoardSheetSlot(boardRequirement.startSlot);
   }, [boardRequirement, boardSheetSlot, pending]);
 
-  // seed the result-entry panel once the hand completes (reset if undone back)
+  // seed the result-entry panel once the hand reaches result (reset if undone)
   useEffect(() => {
     if (!hand || !state) return;
-    if (!state.handComplete) {
+    if (!showResult) {
       resultSeededRef.current = false;
       return;
     }
@@ -171,7 +187,7 @@ export default function Hand() {
       setShowdown(survivors.length > 1);
       setKnownCards({});
     }
-  }, [hand, state]);
+  }, [hand, state, showResult]);
 
   if (!session || !hand || !setup || !state || !settings) {
     return (
@@ -590,7 +606,7 @@ export default function Hand() {
       </div>
 
       <div className="flex-1 p-3 space-y-2">
-        {state.handComplete ? (
+        {showResult ? (
           <div className="space-y-3">
             <div className="bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
               <div className="flex items-center justify-between">
