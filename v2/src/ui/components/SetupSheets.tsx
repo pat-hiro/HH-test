@@ -4,6 +4,76 @@ import NamePicker from "./NamePicker";
 import StackPicker from "./StackPicker";
 
 // ---------------------------------------------------------------------------
+// AnteSheet — BB Ante amount (default 1BB), as BB-multiple presets + custom
+// ---------------------------------------------------------------------------
+
+export function AnteSheet({
+  ante,
+  bb,
+  onCancel,
+  onSave,
+}: {
+  ante: number;
+  bb: number;
+  onCancel: () => void;
+  onSave: (ante: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(ante));
+  const presets = [
+    { label: "OFF", value: 0 },
+    { label: "0.5BB", value: bb * 0.5 },
+    { label: "1BB", value: bb },
+    { label: "1.5BB", value: bb * 1.5 },
+    { label: "2BB", value: bb * 2 },
+  ];
+  return (
+    <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onCancel}>
+      <div
+        className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 safe-bottom"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-sm font-bold mb-1">BB Ante</div>
+        <div className="text-[11px] text-neutral-500 mb-3">
+          BBが支払う共通アンティ（デッド）。デフォルトは1BB。
+        </div>
+        <div className="grid grid-cols-5 gap-2 mb-3">
+          {presets.map((p) => (
+            <button
+              key={p.label}
+              onClick={() => setDraft(String(p.value))}
+              className={`py-2 rounded text-sm ${
+                (parseFloat(draft) || 0) === p.value ? "bg-blue-500" : "bg-neutral-800"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <label>金額（カスタム）</label>
+        <input
+          type="number"
+          inputMode="decimal"
+          onFocus={(e) => e.currentTarget.select()}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <div className="flex gap-2 mt-4">
+          <button onClick={onCancel} className="flex-1 py-3 bg-neutral-800 rounded">
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(parseFloat(draft) || 0)}
+            className="flex-1 py-3 bg-blue-500 rounded font-bold"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // BlindsSheet — two-column SB/BB preset picker + custom input
 // ---------------------------------------------------------------------------
 

@@ -8,12 +8,15 @@ import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
 import {
   AdjustAllSheet,
+  AnteSheet,
   BlindsSheet,
   EditTableSheet,
   HeroPositionSheet,
   PlayerEditSheet,
 } from "../components/SetupSheets";
 import { positionLabels } from "../positions";
+
+const COMMON_CURRENCIES = ["JPY", "USD", "EUR", "GBP", "CNY", "KRW", "AUD"];
 
 /**
  * Cash Setup — full MVP. All control flows are sheets so the table view
@@ -60,6 +63,7 @@ export default function Setup() {
   const [assignBtnMode, setAssignBtnMode] = useState(false);
   const [editingSeat, setEditingSeat] = useState<number | null>(null);
   const [showBlinds, setShowBlinds] = useState(false);
+  const [showAnte, setShowAnte] = useState(false);
   const [showHero, setShowHero] = useState(false);
   const [showAdjustAll, setShowAdjustAll] = useState(false);
   const [showEditTable, setShowEditTable] = useState(false);
@@ -257,15 +261,16 @@ export default function Setup() {
             <span className="text-base">{session.autoStraddle ? "ON" : "OFF"}</span>
           </button>
           <button
-            onClick={async () => {
-              const next = session.ante > 0 ? 0 : session.bb;
-              await Sessions.update(session.id, { ante: next });
-            }}
+            onClick={() => setShowAnte(true)}
             className={`py-3 rounded font-bold text-sm ${session.ante > 0 ? "bg-blue-700" : "bg-neutral-700"}`}
           >
             BB Ante
             <br />
-            <span className="text-base">{session.ante > 0 ? session.ante : "OFF"}</span>
+            <span className="text-base">
+              {session.ante > 0
+                ? `${session.ante}${session.bb ? ` (${(session.ante / session.bb).toFixed(session.ante % session.bb === 0 ? 0 : 1)}BB)` : ""}`
+                : "OFF"}
+            </span>
           </button>
         </div>
 
@@ -307,15 +312,52 @@ export default function Setup() {
         </div>
 
         <div className="bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
-          <div>
-            <label>日付</label>
-            <input
-              type="date"
-              value={session.date}
-              onChange={async (e) => {
-                await Sessions.update(session.id, { date: e.target.value });
-              }}
-            />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label>日付</label>
+              <input
+                type="date"
+                value={session.date}
+                onChange={async (e) => {
+                  await Sessions.update(session.id, { date: e.target.value });
+                }}
+              />
+            </div>
+            <div>
+              <label>通貨</label>
+              <select
+                value={
+                  COMMON_CURRENCIES.includes(session.currency)
+                    ? session.currency
+                    : "__other"
+                }
+                onChange={async (e) => {
+                  await Sessions.update(session.id, {
+                    currency: e.target.value === "__other" ? "" : e.target.value,
+                  });
+                }}
+              >
+                {COMMON_CURRENCIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+                <option value="__other">その他…</option>
+              </select>
+              {!COMMON_CURRENCIES.includes(session.currency) && (
+                <input
+                  className="mt-1"
+                  value={session.currency}
+                  maxLength={3}
+                  placeholder="例: THB"
+                  onChange={async (e) => {
+                    await Sessions.update(session.id, {
+                      currency: e.target.value.toUpperCase().slice(0, 3),
+                    });
+                  }}
+                />
+              )}
+            </div>
           </div>
           <div>
             <label>カジノ / ロケーション</label>
@@ -324,6 +366,17 @@ export default function Setup() {
               placeholder="例: Bellagio"
               onChange={async (e) => {
                 await Sessions.update(session.id, { casino: e.target.value });
+              }}
+            />
+          </div>
+          <div>
+            <label>特殊ルール / セッションメモ</label>
+            <textarea
+              rows={2}
+              value={session.note}
+              placeholder="例: 7-2でボーナス、ストドラ任意、ハイハンド毎時 など"
+              onChange={async (e) => {
+                await Sessions.update(session.id, { note: e.target.value });
               }}
             />
           </div>
@@ -372,6 +425,18 @@ export default function Setup() {
           onSave={async (sb, bb) => {
             await Sessions.update(session.id, { sb, bb });
             setShowBlinds(false);
+          }}
+        />
+      )}
+
+      {showAnte && (
+        <AnteSheet
+          ante={session.ante}
+          bb={session.bb}
+          onCancel={() => setShowAnte(false)}
+          onSave={async (ante) => {
+            await Sessions.update(session.id, { ante });
+            setShowAnte(false);
           }}
         />
       )}

@@ -209,6 +209,17 @@ export default function Hand() {
     hand.board.river,
   ];
 
+  // map each seat to its forced-bet role for chip coloring (preflop only)
+  const forcedKindBySeat = new Map<number, "sb" | "bb" | "straddle" | "post">();
+  for (const f of setup.forced) {
+    if (f.kind === "ante") continue;
+    // straddle/post outrank sb/bb if a seat somehow has both
+    const prev = forcedKindBySeat.get(f.seat);
+    if (!prev || f.kind === "straddle" || f.kind === "post") {
+      forcedKindBySeat.set(f.seat, f.kind);
+    }
+  }
+
   const seatVMs: SeatVM[] = hand.seats.map((s) => ({
     seat: s.seat,
     position: positions.get(s.seat) ?? "",
@@ -224,6 +235,7 @@ export default function Hand() {
         ? hand.heroCards
         : knownCards[s.seat] ?? null,
     liveBet: state.liveThisStreet[s.seat] ?? 0,
+    blind: state.street === "PF" ? forcedKindBySeat.get(s.seat) ?? null : null,
   }));
 
   // ----- mutations ----------------------------------------------------------
