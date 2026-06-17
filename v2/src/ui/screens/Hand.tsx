@@ -235,8 +235,12 @@ export default function Hand() {
 
   // map each seat to its forced-bet role for chip coloring (preflop only)
   const forcedKindBySeat = new Map<number, "sb" | "bb" | "straddle" | "post">();
+  const anteBySeat = new Map<number, number>();
   for (const f of setup.forced) {
-    if (f.kind === "ante") continue;
+    if (f.kind === "ante") {
+      anteBySeat.set(f.seat, (anteBySeat.get(f.seat) ?? 0) + f.amount);
+      continue;
+    }
     // straddle/post outrank sb/bb if a seat somehow has both
     const prev = forcedKindBySeat.get(f.seat);
     if (!prev || f.kind === "straddle" || f.kind === "post") {
@@ -260,6 +264,7 @@ export default function Hand() {
         : knownCards[s.seat] ?? null,
     liveBet: state.liveThisStreet[s.seat] ?? 0,
     blind: state.street === "PF" ? forcedKindBySeat.get(s.seat) ?? null : null,
+    ante: state.street === "PF" ? anteBySeat.get(s.seat) ?? 0 : 0,
   }));
 
   // ----- mutations ----------------------------------------------------------
@@ -492,6 +497,35 @@ export default function Hand() {
         isAllIn: false,
       }));
     if (rows.length > 0) await Actions.bulkCreate(rows);
+  };
+
+  // Postflop "Check Thru" — emit a CHECK action for every remaining seat
+  // until the street closes. Used by the user when nobody bet (or after a
+  // bet that everyone called) to fast-forward straight to the next street.
+  // Stops if anyone faces a non-zero toCall (i.e. nothing-to-check).
+  const checkThru = async () => {
+    if (!handId) return;
+    let work = [...engineActions];
+    let baseOrder = stored.length;
+    const newRows: Omit<StoredAction, "id" | "updatedAt" | "deletedAt">[] = [];
+    let safety = 30;
+    while (safety-- > 0) {
+      const st = computeState(setup, work);
+      if (st.currentSeat === null) break;
+      if (st.toCall > 0) break; // someone has to call — abort
+      const ea = moveToAction(setup, work, { seat: st.currentSeat, type: "check" });
+      newRows.push({
+        handId,
+        order: baseOrder++,
+        street: ea.street,
+        seat: ea.seat,
+        type: ea.type,
+        amount: ea.amount,
+        isAllIn: false,
+      });
+      work = [...work, ea];
+    }
+    if (newRows.length > 0) await Actions.bulkCreate(newRows);
   };
 
   // build the winners array from the result-entry shares
@@ -785,7 +819,16 @@ export default function Hand() {
                   <button onClick={foldAll} className="px-4 py-2 bg-rose-500 rounded text-sm font-bold">
                     Fold All
                   </button>
-                ) : null}
+                ) : (
+                  state.toCall === 0 && (
+                    <button
+                      onClick={checkThru}
+                      className="px-4 py-2 bg-amber-600 rounded text-sm font-bold"
+                    >
+                      Check Thru
+                    </button>
+                  )
+                )}
               </div>
             </div>
 

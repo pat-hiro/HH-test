@@ -428,17 +428,24 @@ export default function Setup() {
                 <option value="__other">その他…</option>
               </select>
               {!COMMON_CURRENCIES.includes(session.currency) && (
-                <input
-                  className="mt-1"
-                  value={session.currency}
-                  maxLength={3}
-                  placeholder="例: THB"
-                  onChange={async (e) => {
-                    await Sessions.update(session.id, {
-                      currency: e.target.value.toUpperCase().slice(0, 3),
-                    });
-                  }}
-                />
+                <>
+                  <input
+                    className={`mt-1 ${session.currency.length === 3 ? "" : "border-rose-500"}`}
+                    value={session.currency}
+                    maxLength={3}
+                    placeholder="例: THB"
+                    onChange={async (e) => {
+                      await Sessions.update(session.id, {
+                        currency: e.target.value.toUpperCase().slice(0, 3),
+                      });
+                    }}
+                  />
+                  {session.currency.length !== 3 && (
+                    <div className="text-[10px] text-rose-300 mt-1">
+                      ISO 4217 で3文字（例: JPY, USD, THB）
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

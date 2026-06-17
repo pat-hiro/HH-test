@@ -16,6 +16,8 @@ export interface SeatVM {
   liveBet: number;
   /** "sb" | "bb" | "straddle" | "post" | null — drives the chip color/label */
   blind?: "sb" | "bb" | "straddle" | "post" | null;
+  /** dead BB-ante chip (preflop only) — pot-only, doesn't affect to-call */
+  ante?: number;
 }
 
 /** A poker-chip-styled bet marker. */
@@ -92,22 +94,36 @@ export default function PokerTable({
 
       {seats.map((s) => {
         const { x, y } = seatXY(s.seat, totalSeats);
-        // pull the bet chip toward the table centre so it reads as "in front of" the seat
-        const towardCenterX = (50 - x) * 0.28;
-        const towardCenterY = (50 - y) * 0.28;
+        // Pull the bet chip toward the table centre so it reads as "in front of"
+        // the seat — but cap the pull so chips for seats near the top/bottom
+        // don't intrude on the central pot/board strip.
+        const dx = 50 - x;
+        const dy = 50 - y;
+        const dist = Math.max(1, Math.hypot(dx, dy));
+        const pull = Math.min(0.32, 12 / dist);
+        const towardCenterX = dx * pull;
+        const towardCenterY = dy * pull;
         return (
           <div key={s.seat}>
-            {/* bet chip, placed between the seat and the pot */}
-            {s.liveBet > 0 && (
+            {/* bet + ante chips, placed between the seat and the pot */}
+            {(s.liveBet > 0 || (s.ante ?? 0) > 0) && (
               <div
-                className="absolute z-10 pointer-events-none"
+                className="absolute z-10 pointer-events-none flex flex-col items-center gap-0.5"
                 style={{
                   left: `${x + towardCenterX}%`,
                   top: `${y + towardCenterY}%`,
                   transform: "translate(-50%, -50%)",
                 }}
               >
-                <Chip amount={s.liveBet} kind={s.blind} />
+                {s.liveBet > 0 && <Chip amount={s.liveBet} kind={s.blind} />}
+                {(s.ante ?? 0) > 0 && (
+                  <div className="flex items-center gap-1 bg-neutral-900/85 rounded-full pl-0.5 pr-1.5 py-0.5 shadow">
+                    <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-b from-neutral-300 to-neutral-500 border border-white/60" />
+                    <span className="text-[8px] text-neutral-300 leading-none">
+                      ANTE {s.ante}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
