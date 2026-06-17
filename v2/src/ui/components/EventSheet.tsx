@@ -32,8 +32,37 @@ export default function EventSheet({
   const [resolution, setResolution] = useState("");
   const [cardsOpen, setCardsOpen] = useState(false);
 
+  // Reset dependent fields when the type changes so a resolution chosen under
+  // EXPOSED_CARD doesn't leak into a MISDEAL save (the two have different
+  // option sets).
+  const changeType = (t: EventType) => {
+    if (t === type) return;
+    setType(t);
+    setSeat(null);
+    setCards([]);
+    setResolution("");
+  };
+
+  // The 記録 button is disabled until the event actually says something:
+  //   NOTE          → some note text
+  //   EXPOSED_CARD  → a seat + at least one card
+  //   MISDEAL       → a seat + a chosen resolution
+  // Saving an empty event only adds noise to the hand history.
+  const canSave =
+    (type === "NOTE" && note.trim() !== "") ||
+    (type === "EXPOSED_CARD" && seat !== null && cards.length > 0) ||
+    (type === "MISDEAL" && seat !== null && resolution !== "");
+  const dirty =
+    note.trim() !== "" ||
+    seat !== null ||
+    cards.length > 0 ||
+    resolution !== "";
+  const onBackdrop = () => {
+    if (!dirty || confirm("入力中の内容を破棄しますか？")) onCancel();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-end" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-end" onClick={onBackdrop}>
       <div
         className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 safe-bottom max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -43,7 +72,7 @@ export default function EventSheet({
           {(["NOTE", "EXPOSED_CARD", "MISDEAL"] as EventType[]).map((t) => (
             <button
               key={t}
-              onClick={() => setType(t)}
+              onClick={() => changeType(t)}
               className={`py-2 rounded text-sm ${type === t ? "bg-blue-500" : "bg-neutral-800"}`}
             >
               {t === "NOTE" ? "メモ" : t === "EXPOSED_CARD" ? "カード露出" : "Misdeal"}
@@ -125,7 +154,8 @@ export default function EventSheet({
                 resolution,
               })
             }
-            className="flex-1 py-3 bg-blue-500 rounded font-bold"
+            disabled={!canSave}
+            className="flex-1 py-3 bg-blue-500 rounded font-bold disabled:opacity-40"
           >
             記録
           </button>

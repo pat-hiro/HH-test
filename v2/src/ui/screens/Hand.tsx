@@ -452,6 +452,10 @@ export default function Hand() {
       const foldCount = moves.filter((m) => m.type === "fold").length;
       const wouldEndHand = projected.inHand.length <= 1 || projected.handComplete;
       const targetReached = projected.currentSeat === seat;
+      // Any auto-fold deserves a confirm — a tap-target that silently folds
+      // 1-2 players is the exact mistake the review flagged. Hand-ending and
+      // miss-target cascades get a more explicit message so the user knows
+      // why the prompt is harder to ignore.
       if (wouldEndHand) {
         if (
           !confirm(
@@ -459,12 +463,9 @@ export default function Hand() {
           )
         )
           return;
-      } else if (!targetReached && foldCount >= 3) {
-        if (
-          !confirm(
-            `タップした席まで届かず、${foldCount} 人が fold します。続行しますか？`
-          )
-        )
+      } else if (foldCount > 0) {
+        const detail = !targetReached ? "（タップした席までは届きません）" : "";
+        if (!confirm(`${foldCount} 人が fold します${detail}。続行しますか？`))
           return;
       }
 
@@ -1240,9 +1241,16 @@ export default function Hand() {
                 Check
               </button>
             )}
-            {canRaise && (
-              <button onClick={openRaise} className="w-full py-4 bg-emerald-600 rounded font-bold text-lg">
-                Raise
+            {/* Show Raise even when it isn't legal (facing a partial all-in
+                that didn't reopen action) — disabled with a reason, so the
+                user doesn't wonder why the button vanished. */}
+            {state.currentBet > 0 && state.currentSeat !== null && (
+              <button
+                onClick={openRaise}
+                disabled={!canRaise}
+                className="w-full py-4 bg-emerald-600 rounded font-bold text-lg disabled:opacity-40"
+              >
+                {canRaise ? "Raise" : "Raise（リオープンなし・Call のみ）"}
               </button>
             )}
             {canBet && (

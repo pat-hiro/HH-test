@@ -10,8 +10,14 @@ export default function NoteSheet({
   onSave: (note: string) => void;
 }) {
   const [text, setText] = useState(initial);
+  const dirty = text !== initial;
+  // Backdrop tap should not silently throw away an edit. If the text changed
+  // from what we loaded with, prompt before dismissing.
+  const onBackdrop = () => {
+    if (!dirty || confirm("変更を破棄しますか？")) onCancel();
+  };
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-end" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-end" onClick={onBackdrop}>
       <div
         className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 safe-bottom"
         onClick={(e) => e.stopPropagation()}

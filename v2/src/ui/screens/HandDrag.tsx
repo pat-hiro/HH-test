@@ -463,12 +463,9 @@ export default function HandDrag() {
           )
         )
           return;
-      } else if (!targetReached && foldCount >= 3) {
-        if (
-          !confirm(
-            `タップした席まで届かず、${foldCount} 人が fold します。続行しますか？`
-          )
-        )
+      } else if (foldCount > 0) {
+        const detail = !targetReached ? "（タップした席までは届きません）" : "";
+        if (!confirm(`${foldCount} 人が fold します${detail}。続行しますか？`))
           return;
       }
 

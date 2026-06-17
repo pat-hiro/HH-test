@@ -36,9 +36,15 @@ export default function CardPickerSheet({
     const nxt = next.findIndex((c, i) => i > active && c === null);
     if (nxt !== -1) setActive(nxt);
   };
+  // Confirm before dismissing on backdrop tap if the user changed any slot —
+  // tapping the felt outside the sheet otherwise discards a typed-in hand.
+  const dirty = slots.some((c, i) => c !== (initial[i] ?? null));
+  const onBackdrop = () => {
+    if (!dirty || confirm("選んだカードを破棄しますか？")) onCancel();
+  };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-end" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-end" onClick={onBackdrop}>
       <div
         className="bg-neutral-900 w-full max-w-xl mx-auto rounded-t-2xl border-t border-neutral-800 safe-bottom"
         onClick={(e) => e.stopPropagation()}

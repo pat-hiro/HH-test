@@ -71,6 +71,14 @@ export default function BoardCardSheet({
     setSlots(next);
   };
 
+  /** Confirm before wiping the entire board (flop+turn+river) since the
+   *  ⟲ button sits right next to the per-slot 🗑 and the cost of a mis-tap is
+   *  losing all five correctly-entered cards. */
+  const confirmClearAll = () => {
+    const anyFilled = slots.some((c) => c);
+    if (!anyFilled || confirm("ボードを全て消去しますか？")) onClear();
+  };
+
   const slotLabels = ["F1", "F2", "F3", "T", "R"];
 
   // suit row colors — original palette, not GTOW's, but spatially familiar
@@ -133,7 +141,7 @@ export default function BoardCardSheet({
               🗑
             </button>
             <button
-              onClick={onClear}
+              onClick={confirmClearAll}
               title="ボード全消去"
               className="w-11 h-9 bg-neutral-800 rounded flex items-center justify-center text-base"
             >

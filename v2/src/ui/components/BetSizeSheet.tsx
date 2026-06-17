@@ -43,9 +43,18 @@ export default function BetSizeSheet({
   // shrinking their number.
   const isAllInAmount = max !== undefined && num >= max;
   const title = kind === "raise" ? "Raise to" : kind === "bet" ? "Bet" : "All-in";
+  // Treat the sheet as "dirty" once the user has typed/picked anything that
+  // differs from the empty default (bet/raise) or the pre-filled stack
+  // (all-in). A stray backdrop tap otherwise loses the entered amount.
+  const initialDraft =
+    kind === "allin" && initial !== undefined ? String(initial) : "";
+  const dirty = draft !== initialDraft && draft.trim() !== "";
+  const onBackdrop = () => {
+    if (!dirty || confirm("入力中の金額を破棄しますか？")) onCancel();
+  };
 
   return (
-    <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onCancel}>
+    <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onBackdrop}>
       <div
         className="bg-neutral-900 w-full max-w-xl mx-auto p-4 rounded-t-2xl border-t border-neutral-800 safe-bottom max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
