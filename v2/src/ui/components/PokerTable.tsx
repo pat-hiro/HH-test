@@ -24,6 +24,8 @@ export interface SeatVM {
   /** a player is sitting here but isn't in THIS hand (joined mid-hand) —
    *  show them dimmed with a 待機 badge and no cards */
   waiting?: boolean;
+  /** waiting specifically because they chose to wait for the big blind */
+  waitingForBB?: boolean;
 }
 
 /**
@@ -117,39 +119,39 @@ function Chip({
   );
 }
 
-/** A friendly croupier illustration for the dealer position. */
+/** A croupier illustration for the dealer position — visor, bow tie, and a
+ *  fanned pair of cards being pitched, so it reads clearly as "the dealer". */
 function DealerAvatar(): ReactNode {
   return (
-    <svg viewBox="0 0 48 50" className="w-11 h-11 drop-shadow-lg">
-      {/* suit / shoulders */}
-      <path d="M6 50c0-10 8-15 18-15s18 5 18 15z" fill="#1f2937" />
-      {/* lapels */}
-      <path d="M24 35l-6 4 6 9 6-9-6-4z" fill="#111827" />
-      {/* shirt */}
-      <path d="M20 36l4 5 4-5-4-2z" fill="#e5e7eb" />
+    <svg viewBox="0 0 56 52" className="w-12 h-12 drop-shadow-lg">
+      {/* shoulders / dealer vest */}
+      <path d="M10 52c0-10 8-15 18-15s18 5 18 15z" fill="#0f172a" />
+      <path d="M10 52c0-10 8-15 18-15s18 5 18 15z" fill="none" stroke="#1e293b" strokeWidth="1.2" />
+      {/* white shirt + collar */}
+      <path d="M22 38l6 7 6-7-6-2z" fill="#f8fafc" />
+      <path d="M24 37l4 5 4-5" fill="none" stroke="#cbd5e1" strokeWidth="0.8" />
       {/* bow tie */}
-      <path d="M21 37.5l3 2 3-2-3-1.2z" fill="#dc2626" />
-      <circle cx="24" cy="37.6" r="0.9" fill="#7f1d1d" />
+      <path d="M25 39.3l3 2 3-2-3-1.2z" fill="#b91c1c" />
+      <circle cx="28" cy="39.4" r="0.9" fill="#7f1d1d" />
       {/* neck */}
-      <rect x="21" y="30" width="6" height="6" rx="2" fill="#eab891" />
+      <rect x="25" y="31" width="6" height="6" rx="2.5" fill="#e7b08a" />
       {/* head */}
-      <circle cx="24" cy="20" r="9.5" fill="#f3c8a0" />
-      {/* hair */}
-      <path
-        d="M14.5 19c0-6.5 4.2-10.5 9.5-10.5S33.5 12.5 33.5 19c-1.5-2.6-4.8-4-9.5-4s-8 1.4-9.5 4z"
-        fill="#3b2a20"
-      />
-      {/* eyes */}
-      <circle cx="20.8" cy="20" r="1.1" fill="#1f2937" />
-      <circle cx="27.2" cy="20" r="1.1" fill="#1f2937" />
-      {/* smile */}
-      <path
-        d="M20.8 24c1.8 1.7 4.6 1.7 6.4 0"
-        fill="none"
-        stroke="#a15c3a"
-        strokeWidth="1.1"
-        strokeLinecap="round"
-      />
+      <circle cx="28" cy="21" r="9.5" fill="#f0c19a" />
+      {/* hair sides */}
+      <path d="M18.5 22c-1-5 1.5-9 4-10M37.5 22c1-5-1.5-9-4-10" fill="none" stroke="#3b2a20" strokeWidth="2.2" strokeLinecap="round" />
+      {/* green dealer visor */}
+      <path d="M17.5 16.5c2.5-3.5 18.5-3.5 21 0l-1.5 3.2c-1 1.8-17 1.8-18 0z" fill="#15803d" />
+      <path d="M17.5 16.5c2.5-3.5 18.5-3.5 21 0" fill="none" stroke="#166534" strokeWidth="1" />
+      <rect x="22" y="12.5" width="12" height="3.2" rx="1.6" fill="#14532d" />
+      {/* eyes + smile */}
+      <circle cx="24.6" cy="21.5" r="1.1" fill="#1f2937" />
+      <circle cx="31.4" cy="21.5" r="1.1" fill="#1f2937" />
+      <path d="M24.6 25c2 1.7 4.8 1.7 6.8 0" fill="none" stroke="#a15c3a" strokeWidth="1.1" strokeLinecap="round" />
+      {/* a pitched card in front */}
+      <g transform="rotate(-18 9 44)">
+        <rect x="3" y="40" width="9" height="12" rx="1.5" fill="#fff" stroke="#cbd5e1" strokeWidth="0.8" />
+        <text x="7.5" y="48" fontSize="6" textAnchor="middle" fill="#b91c1c" fontWeight="bold">A</text>
+      </g>
     </svg>
   );
 }
@@ -258,7 +260,9 @@ export default function PokerTable({
               {s.stack !== null && (
                 <div className="text-[9px] text-neutral-400">${fmtChips(s.stack)}</div>
               )}
-              <div className="text-[8px] text-amber-400">待機・S{s.seat}</div>
+              <div className="text-[8px] text-amber-400">
+                {s.waitingForBB ? "BB待ち" : "待機"}・S{s.seat}
+              </div>
             </button>
           );
         }
@@ -301,46 +305,49 @@ export default function PokerTable({
 
             <button
               onClick={() => onTapSeat?.(s.seat)}
-              className="absolute flex flex-col items-center"
+              className={`absolute flex flex-col items-center w-16 ${
+                s.isCurrent ? "z-30" : ""
+              }`}
               style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%, -50%)" }}
             >
-              <div className="flex gap-0.5 mb-1 relative">
+              <div className="flex gap-0.5 mb-0.5 relative">
                 <PlayingCard
                   card={s.cards?.[0] ?? null}
-                  size="sm"
+                  size="xs"
                   faceDown={!s.cards}
                   dim={s.isFolded}
                   highlight={s.isCurrent}
                 />
                 <PlayingCard
                   card={s.cards?.[1] ?? null}
-                  size="sm"
+                  size="xs"
                   faceDown={!s.cards}
                   dim={s.isFolded}
                   highlight={s.isCurrent}
                 />
                 {s.isAllIn && !s.isFolded && (
-                  <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-rose-300 bg-black/50 rounded">
+                  <div className="absolute inset-0 flex items-center justify-center text-[7px] font-bold text-rose-300 bg-black/50 rounded">
                     ALL-IN
                   </div>
                 )}
                 {s.isBTN && (
-                  <div className="absolute -top-2.5 -right-2.5 w-7 h-7 rounded-full bg-gradient-to-b from-white to-neutral-200 text-black text-xs font-black flex items-center justify-center border-2 border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.8)] z-20">
+                  <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-gradient-to-b from-white to-neutral-200 text-black text-[10px] font-black flex items-center justify-center border-2 border-yellow-400 shadow-[0_0_6px_rgba(250,204,21,0.8)] z-20">
                     D
                   </div>
                 )}
               </div>
-              {s.position && (
-                <div className="text-[9px] text-neutral-200 px-1 rounded bg-neutral-900/60">
-                  {s.position}
-                </div>
-              )}
-              <div className={`text-[10px] font-semibold ${s.isHero ? "text-yellow-300" : "text-white"}`}>
-                {s.isHero ? "★ " : ""}
+              {/* name + position on one compact line; stack underneath */}
+              <div
+                className={`max-w-full truncate text-[10px] font-semibold leading-tight ${
+                  s.isHero ? "text-yellow-300" : "text-white"
+                } ${s.isCurrent ? "bg-emerald-600/40 rounded px-1" : ""}`}
+              >
+                {s.isHero ? "★" : ""}
+                {s.position ? <span className="text-emerald-300">{s.position} </span> : null}
                 {s.name || "—"}
               </div>
               {s.stack !== null && (
-                <div className="text-[9px] text-neutral-300">
+                <div className="text-[9px] text-neutral-300 leading-tight">
                   ${fmtChips(s.stack)}
                 </div>
               )}

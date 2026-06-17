@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeSetup } from "./setup";
+import { makeSetup, resolveDealtSeats } from "./setup";
 import { computeState, computeSidePots, simulate } from "./reducer";
 import type { SeatSetup } from "./types";
 
@@ -386,5 +386,59 @@ describe("v2 regression: action moves clockwise from the most recent actor", () 
     ]);
     expect(final.street).toBe("F");
     expect(final.streetComplete).toBe(false); // postflop: someone is to act on the flop
+  });
+});
+
+describe("resolveDealtSeats — mid-session BB-wait joiners", () => {
+  const P = (
+    seat: number,
+    over: Partial<{ isAway: boolean; name: string; waitingForBB: boolean }> = {}
+  ) => ({ seat, isAway: false, name: "P" + seat, waitingForBB: false, ...over });
+
+  it("deals every active, non-waiting player", () => {
+    const { dealt, joining } = resolveDealtSeats(
+      [P(1), P(2), P(3)],
+      1,
+      9
+    );
+    expect(dealt).toEqual([1, 2, 3]);
+    expect(joining).toEqual([]);
+  });
+
+  it("excludes a sit-out and an empty seat", () => {
+    const { dealt } = resolveDealtSeats(
+      [P(1), P(2, { isAway: true }), P(3, { name: "" })],
+      1,
+      9
+    );
+    expect(dealt).toEqual([1]);
+  });
+
+  it("holds a BB-waiter out until the button rotates so their seat is the BB", () => {
+    // Occupied 1,2,4 with a waiter at seat 3 (between SB and the old BB).
+    const players = [P(1), P(2), P(4), P(3, { waitingForBB: true })];
+
+    // Button 2: occupied {1,2,3,4} → SB=3? No: SB=nextActive(2)=3, BB=4.
+    // The BB is seat 4, not the waiter, so seat 3 is held out this hand.
+    const held = resolveDealtSeats(players, 2, 9);
+    expect(held.dealt).toEqual([1, 2, 4]);
+    expect(held.joining).toEqual([]);
+
+    // Button 1: with seat 3 occupied the BB is exactly 2 seats clockwise from
+    // the button → seat 3. It's the waiter's turn to post the BB, so they join.
+    const joins = resolveDealtSeats(players, 1, 9);
+    expect(joins.joining).toEqual([3]);
+    expect(joins.dealt).toContain(3);
+  });
+
+  it("a waiter never shifts other players' positions on a hand they're held out", () => {
+    // Button 2 holds seat-3 waiter out → dealt set equals the no-waiter case.
+    const withWaiter = resolveDealtSeats(
+      [P(1), P(2), P(4), P(3, { waitingForBB: true })],
+      2,
+      9
+    ).dealt;
+    const without = resolveDealtSeats([P(1), P(2), P(4)], 2, 9).dealt;
+    expect(withWaiter).toEqual(without);
   });
 });

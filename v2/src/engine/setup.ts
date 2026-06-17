@@ -41,6 +41,41 @@ export function bbSeat(
   return nextActive(sb, seatCount, eligible);
 }
 
+/**
+ * Decide which seats are actually dealt into the next hand, honouring
+ * "waiting for the big blind" joiners. A waiting player is held out until the
+ * hand on which the big blind would land on their seat — at which point they
+ * join (and post the BB as the normal forced bet). Returns the dealt seats and
+ * the subset that is joining THIS hand (whose waitingForBB flag should clear).
+ *
+ * Crucially, a waiting player is only ever included on the exact hand they
+ * become the BB, so while they wait they don't shift anyone else's position.
+ */
+export function resolveDealtSeats(
+  players: {
+    seat: number;
+    isAway: boolean;
+    name: string;
+    waitingForBB?: boolean;
+  }[],
+  buttonSeat: number,
+  seatCount: number
+): { dealt: number[]; joining: number[] } {
+  const active = players.filter((p) => !p.isAway && p.name.trim() !== "");
+  const base = active.filter((p) => !p.waitingForBB).map((p) => p.seat);
+  const waiting = active
+    .filter((p) => p.waitingForBB)
+    .map((p) => p.seat)
+    .sort((a, b) => a - b);
+  const joining: number[] = [];
+  for (const w of waiting) {
+    const tentative = [...base, ...joining, w].sort((a, b) => a - b);
+    if (bbSeat(buttonSeat, seatCount, tentative) === w) joining.push(w);
+  }
+  const dealt = [...base, ...joining].sort((a, b) => a - b);
+  return { dealt, joining };
+}
+
 export interface BlindConfig {
   seats: SeatSetup[];
   seatCount: number;

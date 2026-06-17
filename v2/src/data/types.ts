@@ -68,6 +68,11 @@ export interface SessionPlayer extends Syncable {
   isAway: boolean; // sit-out
   mustPostBB: boolean; // returning-player post for next hand
   postWithAnte: boolean; // adds +0.5BB dead on top of post
+  /** A new mid-session player who chose to wait for the big blind rather than
+   *  post. They are NOT dealt in until the BB naturally reaches their seat, at
+   *  which point this clears and they post the BB as normal. Undefined/false
+   *  for original players and for free-play / posting joiners. */
+  waitingForBB?: boolean;
   stack: number | null; // current carried stack; null = not tracked
   note: string;
 }

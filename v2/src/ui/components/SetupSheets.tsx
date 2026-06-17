@@ -168,12 +168,15 @@ export function BlindsSheet({
 
 type PostMode = "none" | "bb" | "bb_ante";
 
+type EntryMode = "wait" | "post" | "post_ante" | "free";
+
 export function PlayerEditSheet({
   seat,
   player,
   bb,
   ante,
   suggestions,
+  seatingMode = false,
   onClose,
   onSave,
   onSitOut,
@@ -184,6 +187,9 @@ export function PlayerEditSheet({
   /** configured BB-ante in chips; drives the "1BB + ante" post label */
   ante: number;
   suggestions: string[];
+  /** when a NEW player sits down mid-session: show how-they-enter choices
+   *  (wait for BB / post / free) instead of the returning-player post toggle */
+  seatingMode?: boolean;
   onClose: () => void;
   onSave: (patch: Partial<SessionPlayer>) => void;
   onSitOut: () => void;
@@ -196,6 +202,24 @@ export function PlayerEditSheet({
       : "bb"
     : "none";
   const [postMode, setPostMode] = useState<PostMode>(initialPost);
+  // Mid-session newcomers default to waiting for the big blind (casino norm:
+  // you don't get a hand until the BB reaches you unless you post or it's a
+  // free table-change hand).
+  const [entry, setEntry] = useState<EntryMode>("wait");
+
+  const seatingPatch = (): Partial<SessionPlayer> => {
+    switch (entry) {
+      case "post":
+        return { mustPostBB: true, postWithAnte: false, waitingForBB: false, isAway: false };
+      case "post_ante":
+        return { mustPostBB: true, postWithAnte: true, waitingForBB: false, isAway: false };
+      case "free":
+        return { mustPostBB: false, postWithAnte: false, waitingForBB: false, isAway: false };
+      case "wait":
+      default:
+        return { mustPostBB: false, postWithAnte: false, waitingForBB: true, isAway: false };
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onClose}>
@@ -219,56 +243,105 @@ export function PlayerEditSheet({
             <label>スタック</label>
             <StackPicker value={stack} bb={bb} onChange={(v) => setStack(v)} />
           </div>
-          <div>
-            <div className="text-xs text-neutral-400 mb-1">
-              Post（復帰時に次ハンドで支払う）
+          {seatingMode ? (
+            <div>
+              <div className="text-xs text-neutral-400 mb-1">参加方法</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setEntry("wait")}
+                  className={`py-2 rounded text-sm ${entry === "wait" ? "bg-blue-500" : "bg-neutral-800"}`}
+                >
+                  BBを待つ
+                </button>
+                <button
+                  onClick={() => setEntry("free")}
+                  className={`py-2 rounded text-sm ${entry === "free" ? "bg-blue-500" : "bg-neutral-800"}`}
+                >
+                  フリー参加
+                </button>
+                <button
+                  onClick={() => setEntry("post")}
+                  className={`py-2 rounded text-sm ${entry === "post" ? "bg-blue-500" : "bg-neutral-800"}`}
+                >
+                  ポスト 1BB
+                </button>
+                <button
+                  onClick={() => setEntry("post_ante")}
+                  disabled={ante <= 0}
+                  className={`py-2 rounded text-sm ${
+                    entry === "post_ante" ? "bg-blue-500" : "bg-neutral-800"
+                  } disabled:opacity-40`}
+                  title={ante <= 0 ? "BBアンテ未設定" : ""}
+                >
+                  {ante > 0 ? `ポスト 1BB+${ante}` : "ポスト 1BB+ante"}
+                </button>
+              </div>
+              <div className="text-[10px] text-neutral-500 mt-1.5">
+                {entry === "wait"
+                  ? "BBがこの席に来たハンドから参加します（それまで待機）。"
+                  : entry === "free"
+                    ? "次ハンドからポストなしで参加（テーブルチェンジ等）。"
+                    : "次ハンドにポストして参加します。"}
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                onClick={() => setPostMode("none")}
-                className={`py-2 rounded text-sm ${postMode === "none" ? "bg-blue-500" : "bg-neutral-800"}`}
-              >
-                なし
-              </button>
-              <button
-                onClick={() => setPostMode("bb")}
-                className={`py-2 rounded text-sm ${postMode === "bb" ? "bg-blue-500" : "bg-neutral-800"}`}
-              >
-                1BB
-              </button>
-              <button
-                onClick={() => setPostMode("bb_ante")}
-                disabled={ante <= 0}
-                className={`py-2 rounded text-sm ${
-                  postMode === "bb_ante" ? "bg-blue-500" : "bg-neutral-800"
-                } disabled:opacity-40`}
-                title={ante <= 0 ? "BBアンテ未設定" : ""}
-              >
-                {ante > 0 ? `1BB + ${ante}（ante）` : "1BB + ante"}
-              </button>
+          ) : (
+            <div>
+              <div className="text-xs text-neutral-400 mb-1">
+                Post（復帰時に次ハンドで支払う）
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setPostMode("none")}
+                  className={`py-2 rounded text-sm ${postMode === "none" ? "bg-blue-500" : "bg-neutral-800"}`}
+                >
+                  なし
+                </button>
+                <button
+                  onClick={() => setPostMode("bb")}
+                  className={`py-2 rounded text-sm ${postMode === "bb" ? "bg-blue-500" : "bg-neutral-800"}`}
+                >
+                  1BB
+                </button>
+                <button
+                  onClick={() => setPostMode("bb_ante")}
+                  disabled={ante <= 0}
+                  className={`py-2 rounded text-sm ${
+                    postMode === "bb_ante" ? "bg-blue-500" : "bg-neutral-800"
+                  } disabled:opacity-40`}
+                  title={ante <= 0 ? "BBアンテ未設定" : ""}
+                >
+                  {ante > 0 ? `1BB + ${ante}（ante）` : "1BB + ante"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="flex gap-2 mt-4">
-          <button
-            onClick={onSitOut}
-            className={`flex-1 py-3 rounded font-bold ${player.isAway ? "bg-amber-700" : "bg-amber-600"}`}
-          >
-            {player.isAway ? "復帰" : "Sit Out"}
-          </button>
+          {!seatingMode && (
+            <button
+              onClick={onSitOut}
+              className={`flex-1 py-3 rounded font-bold ${player.isAway ? "bg-amber-700" : "bg-amber-600"}`}
+            >
+              {player.isAway ? "復帰" : "Sit Out"}
+            </button>
+          )}
           <button
             onClick={() =>
-              onSave({
-                name: name.trim(),
-                stack,
-                mustPostBB: postMode !== "none",
-                postWithAnte: postMode === "bb_ante",
-              })
+              onSave(
+                seatingMode
+                  ? { name: name.trim(), stack, ...seatingPatch() }
+                  : {
+                      name: name.trim(),
+                      stack,
+                      mustPostBB: postMode !== "none",
+                      postWithAnte: postMode === "bb_ante",
+                    }
+              )
             }
             className="flex-1 py-3 bg-blue-500 rounded font-bold"
           >
-            Confirm
+            {seatingMode ? "着席" : "Confirm"}
           </button>
         </div>
       </div>

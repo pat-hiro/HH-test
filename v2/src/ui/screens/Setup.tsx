@@ -3,7 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../data/db";
 import { Hands, Players, Sessions, Settings } from "../../data/repo";
-import { bbSeat, nextActive, sbSeat } from "../../engine/setup";
+import { bbSeat, nextActive, resolveDealtSeats, sbSeat } from "../../engine/setup";
+import type { SessionPlayer } from "../../data/types";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
 import {
@@ -318,8 +319,13 @@ export default function Setup() {
     if (!ready) return;
     const prev = await Hands.lastForSession(session.id);
     const handNo = (prev?.handNo ?? 0) + 1;
+    const { dealt, joining } = resolveDealtSeats(
+      roster,
+      session.buttonSeat!,
+      session.seatCount
+    );
     const seatsSnap = roster
-      .filter((p) => activeSeats.includes(p.seat))
+      .filter((p) => dealt.includes(p.seat))
       .map((p) => ({
         seat: p.seat,
         name: p.name,
@@ -359,9 +365,13 @@ export default function Setup() {
       finalized: false,
     });
     for (const p of roster) {
+      const patch: Partial<SessionPlayer> = {};
       if (p.mustPostBB || p.postWithAnte) {
-        await Players.update(p.id, { mustPostBB: false, postWithAnte: false });
+        patch.mustPostBB = false;
+        patch.postWithAnte = false;
       }
+      if (p.waitingForBB && joining.includes(p.seat)) patch.waitingForBB = false;
+      if (Object.keys(patch).length > 0) await Players.update(p.id, patch);
     }
     nav(`/sessions/${session.id}/hands/${h.id}`);
   };

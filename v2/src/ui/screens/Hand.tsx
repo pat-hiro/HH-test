@@ -3,11 +3,11 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../data/db";
 import { Actions, Events, Hands, Players, Sessions, Settings } from "../../data/repo";
-import { makeSetup, nextActive } from "../../engine/setup";
+import { makeSetup, nextActive, resolveDealtSeats } from "../../engine/setup";
 import { computeState, moveToAction } from "../../engine/reducer";
 import type { Move } from "../../engine/reducer";
 import type { Action as EngineAction, HandState, Street } from "../../engine/types";
-import type { Action as StoredAction } from "../../data/types";
+import type { Action as StoredAction, SessionPlayer } from "../../data/types";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
 import PlayingCard from "../components/PlayingCard";
@@ -341,7 +341,13 @@ export default function Hand() {
     }
     const rp = rosterBySeat.get(seat);
     if (rp && rp.name.trim() !== "" && !rp.isAway) {
-      seatVMs.push({ ...blankVM(seat), name: rp.name, stack: rp.stack, waiting: true });
+      seatVMs.push({
+        ...blankVM(seat),
+        name: rp.name,
+        stack: rp.stack,
+        waiting: true,
+        waitingForBB: rp.waitingForBB ?? false,
+      });
     } else {
       seatVMs.push({ ...blankVM(seat), empty: true });
     }
@@ -828,17 +834,31 @@ export default function Hand() {
     }
     await Sessions.update(session.id, { buttonSeat: next });
 
-    // create next hand snapshot
+    // create next hand snapshot — honour mid-session joiners: players posting
+    // are dealt in with a post chip; players who chose "wait for BB" are held
+    // out until the BB reaches their seat (resolveDealtSeats), then join.
     const prev = await Hands.lastForSession(session.id);
     const handNo = (prev?.handNo ?? hand.handNo) + 1;
     const updatedRoster = await Players.forSession(session.id);
+    const { dealt, joining } = resolveDealtSeats(
+      updatedRoster,
+      next,
+      session.seatCount
+    );
     const seatsSnap = updatedRoster
-      .filter((p) => !p.isAway && p.name.trim() !== "")
+      .filter((p) => dealt.includes(p.seat))
       .map((p) => ({
         seat: p.seat,
         name: p.name,
         startStack: p.stack ?? 0,
-        posted: [] as { kind: "post" | "post_ante"; amount: number }[],
+        posted: p.mustPostBB
+          ? [
+              { kind: "post" as const, amount: hand.bb },
+              ...(p.postWithAnte && hand.ante > 0
+                ? [{ kind: "post_ante" as const, amount: hand.ante }]
+                : []),
+            ]
+          : [],
       }));
     const nh = await Hands.create({
       sessionId: session.id,
@@ -861,6 +881,17 @@ export default function Hand() {
       tags: [],
       finalized: false,
     });
+    // Clear one-time flags now that the snapshot is taken: posts are consumed,
+    // and anyone who just joined off the BB-wait is now a regular player.
+    for (const p of updatedRoster) {
+      const patch: Partial<SessionPlayer> = {};
+      if (p.mustPostBB || p.postWithAnte) {
+        patch.mustPostBB = false;
+        patch.postWithAnte = false;
+      }
+      if (p.waitingForBB && joining.includes(p.seat)) patch.waitingForBB = false;
+      if (Object.keys(patch).length > 0) await Players.update(p.id, patch);
+    }
     nav(`/sessions/${session.id}/hands/${nh.id}`);
   };
 
@@ -1332,19 +1363,21 @@ export default function Hand() {
             bb={hand.bb}
             ante={hand.ante}
             suggestions={[]}
+            seatingMode
             onClose={() => setSeatingSeat(null)}
             onSave={async (patch) => {
               if (existing) {
-                await Players.update(existing.id, { ...patch, isAway: false });
+                await Players.update(existing.id, patch);
               } else {
                 await Players.create({
                   sessionId: session.id,
                   seat: seatingSeat,
                   name: patch.name ?? "",
                   isHero: false,
-                  isAway: false,
+                  isAway: patch.isAway ?? false,
                   mustPostBB: patch.mustPostBB ?? false,
                   postWithAnte: patch.postWithAnte ?? false,
+                  waitingForBB: patch.waitingForBB ?? false,
                   stack: patch.stack ?? null,
                   note: "",
                 });
