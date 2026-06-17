@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../data/db";
-import { Hands, Players, Sessions } from "../../data/repo";
+import { Hands, Players, Sessions, Settings } from "../../data/repo";
 import { nextActive } from "../../engine/setup";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
@@ -44,6 +44,8 @@ export default function Setup() {
         : [],
     [sessionId]
   );
+  const settings = useLiveQuery(() => Settings.get(), []);
+  const heroDefault = settings?.heroDefaultName?.trim() || "Hero";
   const nameSuggestions = useLiveQuery(
     () =>
       db.sessionPlayers.toArray().then((ps) => {
@@ -169,7 +171,14 @@ export default function Setup() {
       }
     }
     const target = roster.find((p) => p.seat === seat);
-    if (target) await Players.update(target.id, { isHero: true });
+    if (target) {
+      const isPlaceholder =
+        target.name.trim() === "" || target.name.trim() === "Unknown";
+      await Players.update(target.id, {
+        isHero: true,
+        ...(isPlaceholder ? { name: heroDefault } : {}),
+      });
+    }
     await Sessions.update(session.id, { heroSeat: seat });
     setShowHero(false);
   };

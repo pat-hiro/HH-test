@@ -163,14 +163,22 @@ export default function Hand() {
   const showResult =
     !!state && (handFoldedOut || (bettingDone && boardRequirement === null));
 
-  // auto-open the board picker the moment the engine advances past the board,
-  // and never auto-dismiss it: input is required for the new street.
+  // Prompt the user for the new street's board cards exactly once when the
+  // engine first crosses into F / T / R. After they dismiss (Cancel or
+  // Confirm with partial entry), don't re-prompt — the user can tap the
+  // board slots on the table anytime to fill missing cards in later.
+  const promptedRef = useRef<Record<Street, boolean>>({
+    PF: false, F: false, T: false, R: false,
+  });
   useEffect(() => {
     if (!boardRequirement) return;
     if (boardSheetSlot !== null) return;
     if (pending !== null) return;
+    if (!state) return;
+    if (promptedRef.current[state.street]) return;
+    promptedRef.current[state.street] = true;
     setBoardSheetSlot(boardRequirement.startSlot);
-  }, [boardRequirement, boardSheetSlot, pending]);
+  }, [boardRequirement, boardSheetSlot, pending, state]);
 
   // seed the result-entry panel once the hand reaches result (reset if undone)
   useEffect(() => {
@@ -329,10 +337,16 @@ export default function Hand() {
   const onTapBoardSlot = (i: number) => setBoardSheetSlot(i);
 
   const submitBoard = async (slots: (string | null)[]) => {
-    const flop =
-      slots[0] && slots[1] && slots[2]
-        ? ([slots[0], slots[1], slots[2]] as [string, string, string])
-        : null;
+    // partial entry is allowed: keep any non-null flop slot, collapse to null
+    // only when ALL three are empty
+    const hasAnyFlop = !!(slots[0] || slots[1] || slots[2]);
+    const flop = hasAnyFlop
+      ? ([slots[0] ?? null, slots[1] ?? null, slots[2] ?? null] as [
+          string | null,
+          string | null,
+          string | null,
+        ])
+      : null;
     await Hands.update(hand.id, {
       board: { flop, turn: slots[3] ?? null, river: slots[4] ?? null },
     });
@@ -607,19 +621,17 @@ export default function Hand() {
 
   // ----- render -------------------------------------------------------------
 
-  const boardBlocked = boardRequirement !== null;
-  const canCheck = state.toCall === 0 && !boardBlocked;
-  const canCall = state.toCall > 0 && !boardBlocked;
-  const canBet =
-    state.currentBet === 0 && state.currentSeat !== null && !boardBlocked;
+  // Board entry no longer blocks action — the user can skip remembering
+  // any board card and continue logging. boardRequirement exists only to
+  // drive the one-time auto-prompt above.
+  const canCheck = state.toCall === 0;
+  const canCall = state.toCall > 0;
+  const canBet = state.currentBet === 0 && state.currentSeat !== null;
   // BB option / facing a raise — both allow Raise. Show alongside Check when
   // there's a live bet but I owe nothing (e.g., BB in a limped pot). Suppressed
   // when state.canRaise is false (e.g., facing a partial all-in: call only).
   const canRaise =
-    state.currentBet > 0 &&
-    state.currentSeat !== null &&
-    !boardBlocked &&
-    state.canRaise;
+    state.currentBet > 0 && state.currentSeat !== null && state.canRaise;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -855,23 +867,26 @@ export default function Hand() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={onFold}
-                disabled={state.currentSeat === null || boardBlocked}
+                disabled={state.currentSeat === null}
                 className="py-4 bg-rose-500 rounded font-bold text-lg disabled:opacity-40"
               >
                 Fold
               </button>
               <button
                 onClick={openAllIn}
-                disabled={state.currentSeat === null || boardBlocked}
+                disabled={state.currentSeat === null}
                 className="py-4 bg-amber-500 rounded font-bold text-lg disabled:opacity-40"
               >
                 All-in
               </button>
             </div>
-            {boardBlocked && (
-              <div className="text-xs text-rose-300 text-center pt-2">
-                次のストリートに進むにはボードカードを入力してください
-              </div>
+            {boardRequirement && (
+              <button
+                onClick={() => setBoardSheetSlot(boardRequirement.startSlot)}
+                className="w-full text-xs text-amber-300 underline pt-2"
+              >
+                ボードカード入力（{boardRequirement.slots.length}枚）
+              </button>
             )}
           </>
         )}
@@ -883,15 +898,8 @@ export default function Hand() {
           startSlot={boardSheetSlot}
           hero={hand.heroCards}
           exclude={board.filter((c): c is string => !!c)}
-          requiredSlots={boardRequirement?.slots}
-          blocking={boardRequirement !== null}
           onSubmit={submitBoard}
-          onCancel={() => {
-            // The sheet can only be dismissed when the board isn't required
-            // for the engine's current street. Otherwise the auto-open effect
-            // immediately reopens it on next render.
-            if (boardRequirement === null) setBoardSheetSlot(null);
-          }}
+          onCancel={() => setBoardSheetSlot(null)}
           onClear={clearBoard}
         />
       )}

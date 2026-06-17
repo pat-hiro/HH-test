@@ -68,7 +68,8 @@ export async function exportSessionCSV(sessionId: string): Promise<void> {
     bb: h.bb,
     ante: h.ante,
     auto_straddle: h.autoStraddle ? 1 : 0,
-    board_flop: h.board.flop?.join(" ") ?? "",
+    board_flop:
+      h.board.flop?.map((c) => c ?? "?").join(" ") ?? "",
     board_turn: h.board.turn ?? "",
     board_river: h.board.river ?? "",
     pot: h.pot,

@@ -107,7 +107,9 @@ export interface Hand extends Syncable {
   // roster snapshot — only active seats are listed
   seats: HandSeatSnapshot[];
   board: {
-    flop: [string, string, string] | null;
+    /** Each slot is independently optional — the user may remember some flop
+     *  cards but not others. A fully empty flop is stored as null. */
+    flop: [string | null, string | null, string | null] | null;
     turn: string | null;
     river: string | null;
   };
@@ -188,6 +190,9 @@ import type { BetPreset } from "./types-presets";
 
 export interface AppSettings extends Syncable {
   baseCurrency: string; // e.g. "JPY"
+  /** Default display name used whenever a seat becomes Hero and its previous
+   *  name was a placeholder ("" or "Unknown"). User-visible in Settings. */
+  heroDefaultName: string;
   pfRaise: BetPreset[];
   pfRaiseStraddle: BetPreset[];
   postflopBet: BetPreset[];

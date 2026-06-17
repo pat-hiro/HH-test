@@ -63,6 +63,7 @@ export default function SettingsScreen() {
   const save = async () => {
     await SettingsRepo.update({
       baseCurrency: draft.baseCurrency,
+      heroDefaultName: draft.heroDefaultName.trim() || "Hero",
       pfRaise: draft.pfRaise,
       pfRaiseStraddle: draft.pfRaiseStraddle,
       postflopBet: draft.postflopBet,
@@ -87,6 +88,18 @@ export default function SettingsScreen() {
       </div>
 
       <div className="p-3 space-y-3">
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-3">
+          <label>Hero名（デフォルト）</label>
+          <input
+            value={draft.heroDefaultName}
+            onChange={(e) => setDraft({ ...draft, heroDefaultName: e.target.value })}
+            placeholder="例: Hero / 自分 / Y"
+          />
+          <div className="text-[11px] text-neutral-500 mt-1">
+            Hero席をアサインした時、未入力／Unknown だった席にこの名前が入ります
+          </div>
+        </div>
+
         <div className="bg-neutral-900 border border-neutral-800 rounded p-3">
           <label>基準通貨</label>
           <input

@@ -232,24 +232,32 @@ const DEFAULT_PRESETS: {
 export const Settings = {
   get: async (): Promise<AppSettings> => {
     const existing = await db.settings.get(SETTINGS_ID);
-    if (existing) return existing;
+    if (existing) {
+      // back-fill defaults so older singletons (saved before the field
+      // existed) don't blow up with `undefined`
+      return { ...existing, heroDefaultName: existing.heroDefaultName || "Hero" };
+    }
     return {
       id: SETTINGS_ID,
       updatedAt: 0,
       deletedAt: null,
       baseCurrency: "JPY",
+      heroDefaultName: "Hero",
       ...DEFAULT_PRESETS,
     };
   },
   update: async (patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> => {
     const existing = await db.settings.get(SETTINGS_ID);
-    const base: AppSettings = existing ?? {
-      id: SETTINGS_ID,
-      updatedAt: 0,
-      deletedAt: null,
-      baseCurrency: "JPY",
-      ...DEFAULT_PRESETS,
-    };
+    const base: AppSettings = existing
+      ? { ...existing, heroDefaultName: existing.heroDefaultName || "Hero" }
+      : {
+          id: SETTINGS_ID,
+          updatedAt: 0,
+          deletedAt: null,
+          baseCurrency: "JPY",
+          heroDefaultName: "Hero",
+          ...DEFAULT_PRESETS,
+        };
     const next = { ...base, ...patch, updatedAt: now() };
     await db.settings.put(next);
     return next;

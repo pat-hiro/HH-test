@@ -367,7 +367,10 @@ function HandDetail({ hand }: { hand: Hand }) {
 function gtoWizardLink(hand: Hand): string {
   const parts: string[] = [`${hand.sb}/${hand.bb}`];
   if (hand.heroCards) parts.push(hand.heroCards.join(""));
-  if (hand.board.flop) parts.push(hand.board.flop.join(""));
+  if (hand.board.flop) {
+    const filled = hand.board.flop.filter((c): c is string => !!c);
+    if (filled.length > 0) parts.push(filled.join(""));
+  }
   if (hand.board.turn) parts.push(hand.board.turn);
   if (hand.board.river) parts.push(hand.board.river);
   const q = encodeURIComponent(parts.join(" "));
