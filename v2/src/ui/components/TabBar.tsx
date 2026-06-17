@@ -1,4 +1,25 @@
+import { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
+
+/** Read the last "play" URL (Setup or Hand) the user was on. Tapping the Play
+ *  tab from Review/Bankroll routes here so the user lands where they left off
+ *  instead of always bouncing back to Setup. Stored in sessionStorage so it
+ *  resets per tab/session but survives navigation within one. */
+const LAST_PLAY_KEY = "v2.lastPlay";
+export function rememberPlayLocation(path: string) {
+  try {
+    sessionStorage.setItem(LAST_PLAY_KEY, path);
+  } catch {
+    /* sessionStorage unavailable (private mode etc.) — ignore */
+  }
+}
+function lastPlayLocation(): string | null {
+  try {
+    return sessionStorage.getItem(LAST_PLAY_KEY);
+  } catch {
+    return null;
+  }
+}
 
 export default function TabBar({ sessionId }: { sessionId: string | null }) {
   const loc = useLocation();
@@ -6,6 +27,17 @@ export default function TabBar({ sessionId }: { sessionId: string | null }) {
   const onHand = /\/hands\/[^/]+/.test(loc.pathname);
   const onReview = loc.pathname.startsWith("/review");
   const onBankroll = loc.pathname.startsWith("/bankroll");
+
+  // Every visit to a Setup or Hand URL becomes the new "last play" the Play
+  // tab returns to. Captured here (instead of in each screen) so neither
+  // screen has to remember to call it on mount.
+  useEffect(() => {
+    if (onSetup || onHand) rememberPlayLocation(loc.pathname);
+  }, [loc.pathname, onSetup, onHand]);
+
+  const remembered = lastPlayLocation();
+  const playTo =
+    remembered ?? (sessionId ? `/sessions/${sessionId}/setup` : "/");
 
   const cls = (active: boolean) =>
     `flex-1 py-2 text-center text-[11px] ${active ? "text-emerald-400 font-bold" : "text-neutral-400"}`;
@@ -16,7 +48,7 @@ export default function TabBar({ sessionId }: { sessionId: string | null }) {
       style={{ paddingBottom: "max(0px, env(safe-area-inset-bottom))" }}
     >
       <Link
-        to={sessionId ? `/sessions/${sessionId}/setup` : "/"}
+        to={playTo}
         className={cls(onSetup || onHand)}
       >
         <div className="text-lg">🎲</div>

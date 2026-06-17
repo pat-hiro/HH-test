@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import PlayingCard from "./PlayingCard";
-import { dealerXY, seatXY } from "../positions";
+import { dealerXY, seatXY, tableAspectFor } from "../positions";
 import { fmtChips } from "../fmt";
 
 export interface SeatVM {
@@ -165,7 +165,7 @@ export default function PokerTable({
   onTapSeat,
   onTapEmptySeat,
   onTapBoardSlot,
-  aspectRatio = "16/10",
+  aspectRatio,
   bb = 1,
   portrait = false,
   heroSeat = null,
@@ -191,10 +191,15 @@ export default function PokerTable({
   maxHeightClass?: string;
 }): ReactNode {
   const seatOpts = { portrait, heroSeat };
+  // Pick a per-seatCount aspect by default — at 9/10/11-handed the table
+  // needs to be closer to square so adjacent right/left-side seats don't
+  // overlap. Callers can still override (e.g. the portrait drag layout uses
+  // a vertical aspect).
+  const aspect = aspectRatio ?? (portrait ? "3/5" : tableAspectFor(totalSeats));
   return (
     <div
       className={`relative w-full ${maxHeightClass ?? "max-h-[46vh]"}`}
-      style={{ aspectRatio }}
+      style={{ aspectRatio: aspect }}
     >
       {/* Wide "racetrack" felt — closer to a real cardroom table than a tall
           oval, and it frees vertical room on the phone for the action row. */}

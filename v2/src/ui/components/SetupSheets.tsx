@@ -417,15 +417,20 @@ export function AdjustAllSheet({
 export function EditTableSheet({
   players,
   buttonSeat,
+  seatCount,
   positions,
   suggestions,
   onClose,
   onUpdate,
   onEmpty,
   onSwap,
+  onAddSeat,
+  onRemoveLastSeat,
 }: {
   players: SessionPlayer[];
   buttonSeat: number | null;
+  /** total seats configured on the session (controls add/remove bounds 2..11) */
+  seatCount: number;
   positions: Map<number, string>;
   suggestions: string[];
   onClose: () => void;
@@ -437,6 +442,11 @@ export function EditTableSheet({
   /** Swap every per-player field (name, stack, Hero, post flags, etc.) between
    *  two seats so a player can move chairs without losing their state. */
   onSwap: (seatA: number, seatB: number) => Promise<void>;
+  /** Bump seatCount by 1 (up to 11) and create a new empty SessionPlayer at
+   *  the new tail seat. */
+  onAddSeat: () => Promise<void>;
+  /** Drop the highest-numbered seat (down to 2). Only allowed if it's empty. */
+  onRemoveLastSeat: () => Promise<void>;
 }) {
   const [swapFrom, setSwapFrom] = useState<number | null>(null);
   const tapRow = async (seat: number) => {
@@ -536,8 +546,27 @@ export function EditTableSheet({
           );
         })}
 
-        <div className="text-center text-[11px] mt-3 text-neutral-500">
-          総席数 {players.length}。座席は固定で、椅子だけ空席にできます。新しい人が来たら名前を入れれば登録完了。
+        <div className="mt-3 flex items-center justify-center gap-2 text-sm">
+          <button
+            onClick={onRemoveLastSeat}
+            disabled={seatCount <= 2}
+            className="px-3 py-1.5 bg-neutral-800 rounded disabled:opacity-40"
+            title="末尾の席を削除（空席のみ）"
+          >
+            − 席を減らす
+          </button>
+          <div className="text-neutral-300">総席数 {seatCount}</div>
+          <button
+            onClick={onAddSeat}
+            disabled={seatCount >= 11}
+            className="px-3 py-1.5 bg-neutral-800 rounded disabled:opacity-40"
+            title="席を1つ追加（最大11）"
+          >
+            ＋ 席を増やす
+          </button>
+        </div>
+        <div className="text-center text-[11px] mt-2 text-neutral-500">
+          末尾の席を空席にしてから削除できます（最小2、最大11）。新しい人が来たら名前を入れれば登録完了。
         </div>
       </div>
     </div>

@@ -921,23 +921,9 @@ export default function HandDrag() {
           Hand #{hand.handNo}
         </div>
       </div>
-      {/* Action row — undo buttons take the leftmost slot (most-used during
-          play), then the street label, then settings. */}
+      {/* Action row — street label + settings. Undo buttons moved down to the
+          Fold-All row to match the classic layout. */}
       <div className="flex items-center px-3 py-2 border-b border-neutral-800">
-        <button
-          onClick={undoStreet}
-          title="1ストリート戻す"
-          className="text-rose-400 text-lg"
-        >
-          ⏮
-        </button>
-        <button
-          onClick={undo}
-          title="1アクション戻す"
-          className="ml-1 text-rose-400 text-lg"
-        >
-          ↶
-        </button>
         <div className="flex-1 text-center font-bold tracking-wider">
           {streetTitle(state.street)}
         </div>
@@ -1237,23 +1223,38 @@ export default function HandDrag() {
             <div className="text-center text-[11px] text-neutral-500 -mt-1">
               アバターを上下左右にドラッグ：↑ Bet/Raise（長めで All-in） ／ ↓ Fold ／ ← Check ／ → Call
             </div>
-            {(state.street === "PF" ||
-              (state.toCall === 0 && state.currentSeat !== null)) && (
-              <div className="flex justify-end">
-                {state.street === "PF" ? (
-                  <button onClick={foldAll} className="px-4 py-2 bg-rose-500 rounded text-sm font-bold">
-                    Fold All
-                  </button>
-                ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={undo}
+                className="px-3 py-2 bg-neutral-800 rounded text-xs text-neutral-200"
+              >
+                1手戻す
+              </button>
+              <button
+                onClick={undoStreet}
+                className="px-3 py-2 bg-neutral-800 rounded text-xs text-neutral-200"
+              >
+                ストリート戻す
+              </button>
+              {state.street === "PF" && (
+                <button
+                  onClick={foldAll}
+                  className="ml-auto px-4 py-2 bg-rose-500 rounded text-sm font-bold"
+                >
+                  Fold All
+                </button>
+              )}
+              {state.street !== "PF" &&
+                state.toCall === 0 &&
+                state.currentSeat !== null && (
                   <button
                     onClick={checkThru}
-                    className="px-4 py-2 bg-amber-600 rounded text-sm font-bold"
+                    className="ml-auto px-4 py-2 bg-amber-600 rounded text-sm font-bold"
                   >
                     Check Thru
                   </button>
                 )}
-              </div>
-            )}
+            </div>
             {boardRequirement && (
               <button
                 onClick={() => setBoardSheetSlot(boardRequirement.startSlot)}

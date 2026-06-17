@@ -411,7 +411,6 @@ export default function Setup() {
           pot={previewPot}
           streetLabel=""
           board={[null, null, null, null, null]}
-          aspectRatio="16/11"
           onTapSeat={onTapSeat}
           onTapEmptySeat={onTapSeat}
           bb={session.bb}
@@ -694,9 +693,43 @@ export default function Setup() {
         <EditTableSheet
           players={roster}
           buttonSeat={session.buttonSeat}
+          seatCount={session.seatCount}
           positions={positions}
           suggestions={nameSuggestions ?? []}
           onClose={() => setShowEditTable(false)}
+          onAddSeat={async () => {
+            if (session.seatCount >= 11) return;
+            const next = session.seatCount + 1;
+            await Sessions.update(session.id, { seatCount: next });
+            await Players.create({
+              sessionId: session.id,
+              seat: next,
+              name: "",
+              isHero: false,
+              isAway: false,
+              mustPostBB: false,
+              postWithAnte: false,
+              stack: null,
+              note: "",
+            });
+          }}
+          onRemoveLastSeat={async () => {
+            if (session.seatCount <= 2) return;
+            const last = session.seatCount;
+            const lastPlayer = roster.find((p) => p.seat === last);
+            // Only allow removing the last seat if it's empty — otherwise the
+            // user is dropping a player they may still want.
+            if (lastPlayer && lastPlayer.name.trim() !== "") {
+              alert(`S${last} を空席にしてから削除してください。`);
+              return;
+            }
+            if (lastPlayer) await Players.remove(lastPlayer.id);
+            await Sessions.update(session.id, { seatCount: last - 1 });
+            if (session.heroSeat === last)
+              await Sessions.update(session.id, { heroSeat: null });
+            if (session.buttonSeat === last)
+              await Sessions.update(session.id, { buttonSeat: null });
+          }}
           onUpdate={async (seat, patch) => {
             const p = roster.find((x) => x.seat === seat);
             if (p) await Players.update(p.id, patch);

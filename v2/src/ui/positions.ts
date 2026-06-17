@@ -28,6 +28,40 @@ export function positionLabels(
   return map;
 }
 
+/**
+ * Push seats away from the right and left horizontal midlines so adjacent
+ * seats on the curved ends have more vertical breathing room. Even-angle
+ * distribution puts pairs like S2&S3 (right midline) and S7&S8 (left midline)
+ * too close together on landscape ovals — especially at 9+ handed. This is
+ * the angular offset added on top of the even spacing; α grows with seat
+ * count because the cramping is worse at higher N.
+ */
+function landscapeSpread(angleDeg: number, total: number): number {
+  if (total <= 6) return angleDeg;
+  // α grows with seat count (worst case is ≥3 seats around each midline at
+  // 10-11 handed). We don't go above 0.25 — beyond that the corner seats get
+  // pushed too close to the dealer.
+  const alpha = total <= 8 ? 0.15 : total === 9 ? 0.2 : 0.25;
+  const r = (angleDeg * Math.PI) / 180;
+  // sin(2θ) is zero at the four extrema (top / right / bottom / left) and
+  // peaks at the four diagonals, so the offset pushes upper-right seats up
+  // and lower-right seats down — exactly the spread we want.
+  return angleDeg + alpha * Math.sin(2 * r) * (180 / Math.PI);
+}
+
+/**
+ * Aspect ratio that gives the table enough vertical room for `seatCount`
+ * players without crowding adjacent right/left-side seats. Lower aspect =
+ * taller container; we go closer to a square as seat count rises.
+ */
+export function tableAspectFor(seatCount: number): string {
+  if (seatCount <= 7) return "16/10";
+  if (seatCount === 8) return "14/10";
+  if (seatCount === 9) return "12/10";
+  // 10/11-handed: nearly square so the curve seats clear each other vertically
+  return "11/10";
+}
+
 export function seatXY(
   seat: number,
   total: number,
@@ -46,7 +80,8 @@ export function seatXY(
     opts.portrait && opts.heroSeat
       ? 180 - opts.heroSeat * (360 / slots)
       : 0;
-  const angleDeg = seat * (360 / slots) - 90 + rotDeg;
+  let angleDeg = seat * (360 / slots) - 90 + rotDeg;
+  if (!opts.portrait) angleDeg = landscapeSpread(angleDeg, total);
   const angle = (angleDeg * Math.PI) / 180;
   // Landscape: wider X, flatter Y — reads like a cardroom table.
   // Portrait: taller Y, narrower X — vertical oval that fills a phone screen.

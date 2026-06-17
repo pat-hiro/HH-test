@@ -934,23 +934,9 @@ export default function Hand() {
           Hand #{hand.handNo}
         </div>
       </div>
-      {/* Action row — undo buttons take the leftmost slot (most-used during
-          play), then the street label, then settings. */}
+      {/* Action row — street label + settings. Undo buttons moved down to the
+          Fold-All row so they sit next to the other "undo a chunk" controls. */}
       <div className="flex items-center px-3 py-2 border-b border-neutral-800">
-        <button
-          onClick={undoStreet}
-          title="1ストリート戻す"
-          className="text-rose-400 text-lg"
-        >
-          ⏮
-        </button>
-        <button
-          onClick={undo}
-          title="1アクション戻す"
-          className="ml-1 text-rose-400 text-lg"
-        >
-          ↶
-        </button>
         <div className="flex-1 text-center font-bold tracking-wider">
           {streetTitle(state.street)}
         </div>
@@ -1213,23 +1199,42 @@ export default function Hand() {
           </div>
         ) : (
           <>
-            {(state.street === "PF" ||
-              (state.toCall === 0 && state.currentSeat !== null)) && (
-              <div className="flex justify-end">
-                {state.street === "PF" ? (
-                  <button onClick={foldAll} className="px-4 py-2 bg-rose-500 rounded text-sm font-bold">
-                    Fold All
-                  </button>
-                ) : (
+            {/* Always show the undo controls so the user can back out a
+                mis-tap at any point — they sit to the LEFT of the
+                Fold-All/Check-Thru shortcut on the same row. Text labels
+                instead of emoji so the function is unambiguous. */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={undo}
+                className="px-3 py-2 bg-neutral-800 rounded text-xs text-neutral-200"
+              >
+                1手戻す
+              </button>
+              <button
+                onClick={undoStreet}
+                className="px-3 py-2 bg-neutral-800 rounded text-xs text-neutral-200"
+              >
+                ストリート戻す
+              </button>
+              {state.street === "PF" && (
+                <button
+                  onClick={foldAll}
+                  className="ml-auto px-4 py-2 bg-rose-500 rounded text-sm font-bold"
+                >
+                  Fold All
+                </button>
+              )}
+              {state.street !== "PF" &&
+                state.toCall === 0 &&
+                state.currentSeat !== null && (
                   <button
                     onClick={checkThru}
-                    className="px-4 py-2 bg-amber-600 rounded text-sm font-bold"
+                    className="ml-auto px-4 py-2 bg-amber-600 rounded text-sm font-bold"
                   >
                     Check Thru
                   </button>
                 )}
-              </div>
-            )}
+            </div>
 
             {canCall && (
               <button onClick={onCall} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
