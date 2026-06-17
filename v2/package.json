@@ -1,0 +1,16 @@
+{
+  "name": "hh-v2",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Live poker hand-history + bankroll app, v2 rebuild. Engine-first.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
