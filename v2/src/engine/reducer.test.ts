@@ -170,6 +170,69 @@ describe("a normal multiway street resolves correctly", () => {
   });
 });
 
+describe("all-in must not end the hand while opponents still owe chips", () => {
+  it("HU: SB jams preflop → BB MUST be the current actor (call or fold)", () => {
+    const setup = makeSetup({
+      seats: [
+        { seat: 1, startStack: 200 },
+        { seat: 2, startStack: 200 },
+      ],
+      seatCount: 2,
+      buttonSeat: 1,
+      sb: 1,
+      bb: 2,
+    });
+    // HU rule: BTN is SB. SB jams. BB still owes chips.
+    const { final } = simulate(setup, [{ seat: 1, type: "allin" }]);
+    expect(final.handComplete).toBe(false);
+    expect(final.currentSeat).toBe(2);
+    expect(final.toCall).toBeGreaterThan(0);
+  });
+
+  it("multiway: when all but one seat is all-in, that seat still gets the option", () => {
+    const setup = makeSetup({
+      // 3 active seats. BTN=1 has 200, SB=2 has 8, BB=3 has 8
+      seats: [
+        { seat: 1, startStack: 200 },
+        { seat: 2, startStack: 8 },
+        { seat: 3, startStack: 8 },
+      ],
+      seatCount: 3,
+      buttonSeat: 1,
+      sb: 1,
+      bb: 2,
+    });
+    // 3-handed: BTN=1, SB=2, BB=3. UTG=BTN seat. BTN jams; SB calls all-in.
+    const { final } = simulate(setup, [
+      { seat: 1, type: "allin" }, // BTN/UTG jams 200
+      { seat: 2, type: "allin" }, // SB calls (effectively allin for 8)
+    ]);
+    // BB still has the option to call or fold the remaining live currentBet
+    expect(final.handComplete).toBe(false);
+    expect(final.currentSeat).toBe(3);
+    expect(final.toCall).toBeGreaterThan(0);
+  });
+
+  it("once the lone non-all-in seat calls, the hand stops requiring action", () => {
+    const setup = makeSetup({
+      seats: [
+        { seat: 1, startStack: 200 },
+        { seat: 2, startStack: 200 },
+      ],
+      seatCount: 2,
+      buttonSeat: 1,
+      sb: 1,
+      bb: 2,
+    });
+    const { final } = simulate(setup, [
+      { seat: 1, type: "allin" }, // SB jams 200
+      { seat: 2, type: "call" }, // BB calls
+    ]);
+    expect(final.currentSeat).toBeNull();
+    expect(final.streetComplete).toBe(true);
+  });
+});
+
 describe("partial all-in (under-raise) does NOT reopen action", () => {
   it("a sub-min-raise all-in lets seats already matched at the prior level call only — not re-raise", () => {
     // 9-max: stacks 200 by default, override seat 8 (UTG+3 / LJ in 9-max

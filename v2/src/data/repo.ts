@@ -202,16 +202,19 @@ const DEFAULT_PRESETS: {
   postflopBet: BetPreset[];
   postflopRaise: BetPreset[];
 } = {
+  // "prev" multiplies the bet level that must be matched: BB on an open
+  // (currentBet = BB), the open size on a 3-bet (currentBet = open), the
+  // 3-bet size on a 4-bet, etc. Same multiplier works at every depth.
   pfRaise: [
-    { label: "2x", multiplier: 2, basis: "bb" },
-    { label: "2.5x", multiplier: 2.5, basis: "bb" },
-    { label: "3x", multiplier: 3, basis: "bb" },
-    { label: "4x", multiplier: 4, basis: "bb" },
+    { label: "2x", multiplier: 2, basis: "prev" },
+    { label: "2.5x", multiplier: 2.5, basis: "prev" },
+    { label: "3x", multiplier: 3, basis: "prev" },
+    { label: "4x", multiplier: 4, basis: "prev" },
   ],
   pfRaiseStraddle: [
-    { label: "2x STR", multiplier: 2, basis: "str" },
-    { label: "2.5x STR", multiplier: 2.5, basis: "str" },
-    { label: "3x STR", multiplier: 3, basis: "str" },
+    { label: "2x", multiplier: 2, basis: "prev" },
+    { label: "2.5x", multiplier: 2.5, basis: "prev" },
+    { label: "3x", multiplier: 3, basis: "prev" },
   ],
   postflopBet: [
     { label: "1/3", multiplier: 0.33, basis: "pot" },
@@ -220,9 +223,9 @@ const DEFAULT_PRESETS: {
     { label: "POT", multiplier: 1, basis: "pot" },
   ],
   postflopRaise: [
-    { label: "2.5x", multiplier: 2.5, basis: "call" },
-    { label: "3x", multiplier: 3, basis: "call" },
-    { label: "4x", multiplier: 4, basis: "call" },
+    { label: "2.5x", multiplier: 2.5, basis: "prev" },
+    { label: "3x", multiplier: 3, basis: "prev" },
+    { label: "4x", multiplier: 4, basis: "prev" },
   ],
 };
 
@@ -233,9 +236,13 @@ export const Settings = {
   get: async (): Promise<AppSettings> => {
     const existing = await db.settings.get(SETTINGS_ID);
     if (existing) {
-      // back-fill defaults so older singletons (saved before the field
+      // back-fill defaults so older singletons (saved before fields
       // existed) don't blow up with `undefined`
-      return { ...existing, heroDefaultName: existing.heroDefaultName || "Hero" };
+      return {
+        ...existing,
+        heroDefaultName: existing.heroDefaultName || "Hero",
+        extraCurrencies: existing.extraCurrencies ?? [],
+      };
     }
     return {
       id: SETTINGS_ID,
@@ -243,19 +250,25 @@ export const Settings = {
       deletedAt: null,
       baseCurrency: "JPY",
       heroDefaultName: "Hero",
+      extraCurrencies: [],
       ...DEFAULT_PRESETS,
     };
   },
   update: async (patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> => {
     const existing = await db.settings.get(SETTINGS_ID);
     const base: AppSettings = existing
-      ? { ...existing, heroDefaultName: existing.heroDefaultName || "Hero" }
+      ? {
+          ...existing,
+          heroDefaultName: existing.heroDefaultName || "Hero",
+          extraCurrencies: existing.extraCurrencies ?? [],
+        }
       : {
           id: SETTINGS_ID,
           updatedAt: 0,
           deletedAt: null,
           baseCurrency: "JPY",
           heroDefaultName: "Hero",
+          extraCurrencies: [],
           ...DEFAULT_PRESETS,
         };
     const next = { ...base, ...patch, updatedAt: now() };

@@ -193,6 +193,10 @@ export interface AppSettings extends Syncable {
   /** Default display name used whenever a seat becomes Hero and its previous
    *  name was a placeholder ("" or "Unknown"). User-visible in Settings. */
   heroDefaultName: string;
+  /** ISO codes for currencies the user has used beyond the built-in common
+   *  list — surfaced in the Cash Setup currency picker and removable in
+   *  Settings. */
+  extraCurrencies: string[];
   pfRaise: BetPreset[];
   pfRaiseStraddle: BetPreset[];
   postflopBet: BetPreset[];

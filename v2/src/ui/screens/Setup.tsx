@@ -46,6 +46,10 @@ export default function Setup() {
   );
   const settings = useLiveQuery(() => Settings.get(), []);
   const heroDefault = settings?.heroDefaultName?.trim() || "Hero";
+  const knownCurrencies = [
+    ...COMMON_CURRENCIES,
+    ...(settings?.extraCurrencies ?? []),
+  ];
   const nameSuggestions = useLiveQuery(
     () =>
       db.sessionPlayers.toArray().then((ps) => {
@@ -316,6 +320,7 @@ export default function Setup() {
           board={[null, null, null, null, null]}
           aspectRatio="5/4"
           onTapSeat={onTapSeat}
+          bb={session.bb}
         />
         {assignBtnMode && (
           <div className="bg-neutral-900/95 border border-neutral-800 rounded p-3 mt-2 text-center">
@@ -419,7 +424,7 @@ export default function Setup() {
               <label>通貨</label>
               <select
                 value={
-                  COMMON_CURRENCIES.includes(session.currency)
+                  knownCurrencies.includes(session.currency)
                     ? session.currency
                     : "__other"
                 }
@@ -434,9 +439,14 @@ export default function Setup() {
                     {c}
                   </option>
                 ))}
+                {(settings?.extraCurrencies ?? []).map((c) => (
+                  <option key={c} value={c}>
+                    {c}（保存済）
+                  </option>
+                ))}
                 <option value="__other">その他…</option>
               </select>
-              {!COMMON_CURRENCIES.includes(session.currency) && (
+              {!knownCurrencies.includes(session.currency) && (
                 <>
                   <input
                     className={`mt-1 ${session.currency.length === 3 ? "" : "border-rose-500"}`}
@@ -447,6 +457,17 @@ export default function Setup() {
                       await Sessions.update(session.id, {
                         currency: e.target.value.toUpperCase().slice(0, 3),
                       });
+                    }}
+                    onBlur={async () => {
+                      const c = session.currency.toUpperCase();
+                      if (c.length === 3 && !knownCurrencies.includes(c)) {
+                        await Settings.update({
+                          extraCurrencies: [
+                            ...(settings?.extraCurrencies ?? []),
+                            c,
+                          ],
+                        });
+                      }
                     }}
                   />
                   {session.currency.length !== 3 && (

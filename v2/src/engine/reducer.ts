@@ -203,13 +203,17 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
     //     limper who has to call again BEFORE the seats between the raiser
     //     and the limper — i.e., the limper got the action instead of the
     //     next seat clockwise from the raiser.
+    //   - We scan even when canAct.length === 1: the remaining player may
+    //     still owe chips against an all-in opponent (e.g. HU jam) or face
+    //     a bet that opened after they last acted. The needsToAct predicate
+    //     below correctly decides whether they actually need to act.
     const fta = firstToAct(setup, street, inHand);
     let currentSeat: number | null = null;
     const scanStart: number | null =
       lastActor !== null
         ? nextActive(lastActor, setup.seatCount, canAct)
         : fta;
-    if (canAct.length >= 2 && scanStart !== null) {
+    if (canAct.length >= 1 && scanStart !== null) {
       let scan: number | null = scanStart;
       for (let i = 0; i < setup.seatCount + 1 && scan !== null; i++) {
         const s = scan;

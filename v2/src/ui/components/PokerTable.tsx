@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import PlayingCard from "./PlayingCard";
 import { seatXY } from "../positions";
+import { fmtChips } from "../fmt";
 
 export interface SeatVM {
   seat: number;
@@ -20,21 +21,43 @@ export interface SeatVM {
   ante?: number;
 }
 
+/**
+ * Pick a chip-face palette graduated by bet size: amber gets darker as the
+ * bet grows from 1BB through 5BB, then stays at the max shade. Every chip
+ * shares the same amber base so SB/BB/STR/POST/regular bets read as the same
+ * family of objects on the felt — the size, not the colour, signals weight.
+ */
+function chipFaceFor(amount: number, bb: number): string {
+  if (bb <= 0) return "from-amber-300 to-amber-500";
+  const ratio = Math.min(1, amount / (bb * 5));
+  if (ratio < 0.2) return "from-amber-200 to-amber-400";
+  if (ratio < 0.4) return "from-amber-300 to-amber-500";
+  if (ratio < 0.6) return "from-amber-400 to-amber-600";
+  if (ratio < 0.8) return "from-amber-500 to-amber-700";
+  return "from-amber-600 to-amber-800";
+}
+
 /** A poker-chip-styled bet marker. */
-function Chip({ amount, kind }: { amount: number; kind?: SeatVM["blind"] }) {
-  // chip face color by role; default (regular bet) is amber
-  const face =
-    kind === "sb"
-      ? "from-sky-400 to-sky-600"
-      : kind === "bb"
-        ? "from-rose-400 to-rose-600"
-        : kind === "straddle"
-          ? "from-fuchsia-400 to-fuchsia-600"
-          : kind === "post"
-            ? "from-purple-400 to-purple-600"
-            : "from-amber-300 to-amber-500";
+function Chip({
+  amount,
+  kind,
+  bb,
+}: {
+  amount: number;
+  kind?: SeatVM["blind"];
+  bb: number;
+}) {
+  const face = chipFaceFor(amount, bb);
   const label =
-    kind === "sb" ? "SB" : kind === "bb" ? "BB" : kind === "straddle" ? "STR" : kind === "post" ? "POST" : null;
+    kind === "sb"
+      ? "SB"
+      : kind === "bb"
+        ? "BB"
+        : kind === "straddle"
+          ? "STR"
+          : kind === "post"
+            ? "POST"
+            : null;
   return (
     <div className="flex items-center gap-1 bg-neutral-900/85 rounded-full pl-0.5 pr-2 py-0.5 shadow-lg">
       <div
@@ -48,7 +71,7 @@ function Chip({ amount, kind }: { amount: number; kind?: SeatVM["blind"] }) {
       </div>
       <span className="text-[11px] font-bold text-yellow-200 leading-none">
         {label && <span className="text-[8px] text-neutral-300 mr-0.5">{label}</span>}
-        {amount}
+        {fmtChips(amount)}
       </span>
     </div>
   );
@@ -63,6 +86,7 @@ export default function PokerTable({
   onTapSeat,
   onTapBoardSlot,
   aspectRatio = "3/4",
+  bb = 1,
 }: {
   totalSeats: number;
   seats: SeatVM[];
@@ -72,6 +96,8 @@ export default function PokerTable({
   onTapSeat?: (seat: number) => void;
   onTapBoardSlot?: (i: number) => void;
   aspectRatio?: string;
+  /** big blind, used to scale the chip-shade gradient by bet-size */
+  bb?: number;
 }): ReactNode {
   return (
     <div className="relative w-full max-h-[60vh]" style={{ aspectRatio }}>
@@ -82,7 +108,9 @@ export default function PokerTable({
         <div className="text-[10px] text-yellow-300 uppercase tracking-wider">
           {streetLabel}
         </div>
-        <div className="text-sm font-bold text-yellow-200 mb-2">Pot {pot}</div>
+        <div className="text-sm font-bold text-yellow-200 mb-2">
+          Pot {fmtChips(pot)}
+        </div>
         <div className="flex gap-1 pointer-events-auto">
           {[0, 1, 2, 3, 4].map((i) => (
             <button key={i} onClick={() => onTapBoardSlot?.(i)}>
@@ -115,12 +143,14 @@ export default function PokerTable({
                   transform: "translate(-50%, -50%)",
                 }}
               >
-                {s.liveBet > 0 && <Chip amount={s.liveBet} kind={s.blind} />}
+                {s.liveBet > 0 && (
+                  <Chip amount={s.liveBet} kind={s.blind} bb={bb} />
+                )}
                 {(s.ante ?? 0) > 0 && (
                   <div className="flex items-center gap-1 bg-neutral-900/85 rounded-full pl-0.5 pr-1.5 py-0.5 shadow">
                     <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-b from-neutral-300 to-neutral-500 border border-white/60" />
                     <span className="text-[8px] text-neutral-300 leading-none">
-                      ANTE {s.ante}
+                      ANTE {fmtChips(s.ante ?? 0)}
                     </span>
                   </div>
                 )}
@@ -168,7 +198,9 @@ export default function PokerTable({
                 {s.name || "—"}
               </div>
               {s.stack !== null && (
-                <div className="text-[9px] text-neutral-300">${s.stack}</div>
+                <div className="text-[9px] text-neutral-300">
+                  ${fmtChips(s.stack)}
+                </div>
               )}
             </button>
           </div>

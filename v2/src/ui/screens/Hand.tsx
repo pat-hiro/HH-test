@@ -16,6 +16,7 @@ import CardPickerSheet from "../components/CardPickerSheet";
 import NoteSheet from "../components/NoteSheet";
 import EventSheet from "../components/EventSheet";
 import { positionLabels } from "../positions";
+import { fmtChips } from "../fmt";
 
 // ----- helpers --------------------------------------------------------------
 
@@ -408,6 +409,7 @@ export default function Hand() {
     pot: state.pot,
     toCall: state.toCall,
     straddleAmount: handStraddleAmount,
+    currentBet: state.currentBet,
   };
 
   const presetsForPending = (): typeof settings.pfRaise => {
@@ -652,6 +654,7 @@ export default function Hand() {
           board={board}
           onTapSeat={onTapSeat}
           onTapBoardSlot={onTapBoardSlot}
+          bb={hand.bb}
         />
       </div>
 
@@ -687,7 +690,7 @@ export default function Hand() {
             <div className="bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-bold">結果</div>
-                <div className="text-sm text-neutral-300">Pot {state.pot}</div>
+                <div className="text-sm text-neutral-300">Pot {fmtChips(state.pot)}</div>
               </div>
 
               <label className="flex items-center gap-2 text-sm">
@@ -846,7 +849,7 @@ export default function Hand() {
 
             {canCall && (
               <button onClick={onCall} className="w-full py-4 bg-blue-500 rounded font-bold text-lg">
-                Call {state.toCall}
+                Call {fmtChips(state.toCall)}
               </button>
             )}
             {canCheck && state.currentSeat !== null && (

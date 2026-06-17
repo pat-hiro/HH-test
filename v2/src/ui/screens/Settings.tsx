@@ -8,21 +8,22 @@ import type { BetPreset } from "../../data/types-presets";
 type ListKey = "pfRaise" | "pfRaiseStraddle" | "postflopBet" | "postflopRaise";
 
 const SECTIONS: { key: ListKey; title: string; bases: BetPreset["basis"][] }[] = [
-  { key: "pfRaise", title: "PF レイズ", bases: ["bb", "pot"] },
+  { key: "pfRaise", title: "PF レイズ", bases: ["prev", "bb", "pot"] },
   {
     key: "pfRaiseStraddle",
     title: "PF レイズ（ストラドル時）",
-    bases: ["str", "bb", "pot"],
+    bases: ["prev", "str", "bb", "pot"],
   },
   { key: "postflopBet", title: "ポストフロップ ベット", bases: ["pot", "bb"] },
   {
     key: "postflopRaise",
     title: "ポストフロップ レイズ",
-    bases: ["call", "pot", "bb"],
+    bases: ["prev", "call", "pot", "bb"],
   },
 ];
 
 const BASIS_LABEL: Record<BetPreset["basis"], string> = {
+  prev: "前ベット",
   bb: "BB",
   str: "STR",
   pot: "Pot",
@@ -64,6 +65,7 @@ export default function SettingsScreen() {
     await SettingsRepo.update({
       baseCurrency: draft.baseCurrency,
       heroDefaultName: draft.heroDefaultName.trim() || "Hero",
+      extraCurrencies: draft.extraCurrencies,
       pfRaise: draft.pfRaise,
       pfRaiseStraddle: draft.pfRaiseStraddle,
       postflopBet: draft.postflopBet,
@@ -112,7 +114,50 @@ export default function SettingsScreen() {
           <div className="text-[11px] text-neutral-500 mt-1">
             Bankroll での合計計算と為替換算に使用
           </div>
+          <label className="flex items-center gap-2 mt-3">
+            <input
+              type="checkbox"
+              checked={!draft.baseCurrency}
+              onChange={(e) =>
+                setDraft({ ...draft, baseCurrency: e.target.checked ? "" : "JPY" })
+              }
+            />
+            <span className="text-xs">基準通貨を使わない</span>
+          </label>
         </div>
+
+        {(draft.extraCurrencies ?? []).length > 0 && (
+          <div className="bg-neutral-900 border border-neutral-800 rounded p-3">
+            <div className="text-sm font-bold mb-2">保存済の通貨</div>
+            <div className="flex flex-wrap gap-2">
+              {draft.extraCurrencies.map((c) => (
+                <div
+                  key={c}
+                  className="flex items-center gap-1 bg-neutral-800 rounded pl-2 pr-1 py-1"
+                >
+                  <span className="text-sm">{c}</span>
+                  <button
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        extraCurrencies: draft.extraCurrencies.filter(
+                          (x) => x !== c
+                        ),
+                      })
+                    }
+                    className="text-xs text-rose-400 px-1"
+                    title="削除"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="text-[11px] text-neutral-500 mt-2">
+              Cash Setup で「その他…」から入力した通貨が自動で保存されます
+            </div>
+          </div>
+        )}
 
         {SECTIONS.map((sec) => (
           <div key={sec.key} className="bg-neutral-900 border border-neutral-800 rounded p-3">
