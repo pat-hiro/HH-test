@@ -1,17 +1,23 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../data/db";
 import { Hands, Players, Sessions } from "../../data/repo";
+import { nextActive } from "../../engine/setup";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
+import {
+  AdjustAllSheet,
+  BlindsSheet,
+  EditTableSheet,
+  HeroPositionSheet,
+  PlayerEditSheet,
+} from "../components/SetupSheets";
 import { positionLabels } from "../positions";
 
 /**
- * Cash Setup — minimal MVP:
- * - Visual table
- * - Tap to set Hero (sets the seat) / BTN (cycles through active seats)
- * - Start Hand: snapshots roster + stakes into a Hand row, navigates to /hands/:id
+ * Cash Setup — full MVP. All control flows are sheets so the table view
+ * stays visible at the top; the screen never scrolls a control off-screen.
  */
 export default function Setup() {
   const { sessionId } = useParams();
@@ -28,16 +34,39 @@ export default function Setup() {
             .equals(sessionId)
             .toArray()
             .then((rs) =>
-              rs
-                .filter((r) => r.deletedAt === null)
-                .sort((a, b) => a.seat - b.seat)
+              rs.filter((r) => r.deletedAt === null).sort((a, b) => a.seat - b.seat)
             )
         : [],
     [sessionId]
   );
+  const nameSuggestions = useLiveQuery(
+    () =>
+      db.sessionPlayers.toArray().then((ps) => {
+        const counts = new Map<string, number>();
+        for (const p of ps) {
+          if (p.deletedAt !== null) continue;
+          const n = p.name.trim();
+          if (!n) continue;
+          counts.set(n, (counts.get(n) ?? 0) + 1);
+        }
+        return Array.from(counts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([n]) => n);
+      }),
+    []
+  );
+
+  // sheets
+  const [assignBtnMode, setAssignBtnMode] = useState(false);
+  const [editingSeat, setEditingSeat] = useState<number | null>(null);
+  const [showBlinds, setShowBlinds] = useState(false);
+  const [showHero, setShowHero] = useState(false);
+  const [showAdjustAll, setShowAdjustAll] = useState(false);
+  const [showEditTable, setShowEditTable] = useState(false);
 
   const activeSeats = useMemo(
-    () => (roster ?? []).filter((p) => !p.isAway && p.name.trim() !== "").map((p) => p.seat),
+    () =>
+      (roster ?? []).filter((p) => !p.isAway && p.name.trim() !== "").map((p) => p.seat),
     [roster]
   );
 
@@ -47,6 +76,8 @@ export default function Setup() {
   );
 
   if (!session || !roster) return null;
+
+  // ----- VM ----------------------------------------------------------------
 
   const seatsVM: SeatVM[] = roster.map((p) => ({
     seat: p.seat,
@@ -62,28 +93,42 @@ export default function Setup() {
     liveBet: 0,
   }));
 
+  // ----- handlers ----------------------------------------------------------
+
   const onTapSeat = async (seat: number) => {
-    // Cycle: if not hero and not BTN, become Hero. If Hero, become BTN. If both, clear.
-    const p = roster.find((x) => x.seat === seat);
-    if (!p) return;
-    if (!p.isHero && session.buttonSeat !== seat) {
-      for (const other of roster) {
-        if (other.isHero && other.id !== p.id) {
-          await Players.update(other.id, { isHero: false });
-        }
+    if (assignBtnMode) {
+      if (activeSeats.includes(seat)) {
+        await Sessions.update(session.id, { buttonSeat: seat });
       }
-      await Players.update(p.id, { isHero: true });
-      await Sessions.update(session.id, { heroSeat: seat });
+      setAssignBtnMode(false);
       return;
     }
-    if (p.isHero && session.buttonSeat !== seat) {
-      await Sessions.update(session.id, { buttonSeat: seat });
-      return;
+    setEditingSeat(seat);
+  };
+
+  const moveBtn = async (dir: "ccw" | "cw") => {
+    if (session.buttonSeat === null || activeSeats.length === 0) return;
+    let next: number | null = session.buttonSeat;
+    if (dir === "cw") {
+      next = nextActive(session.buttonSeat, session.seatCount, activeSeats);
+    } else {
+      const sorted = [...activeSeats].sort((a, b) => a - b);
+      const idx = sorted.indexOf(session.buttonSeat);
+      next = idx <= 0 ? sorted[sorted.length - 1] : sorted[idx - 1];
     }
-    if (session.buttonSeat === seat) {
-      // both hero+btn → clear btn
-      await Sessions.update(session.id, { buttonSeat: null });
+    if (next !== null) await Sessions.update(session.id, { buttonSeat: next });
+  };
+
+  const setHero = async (seat: number) => {
+    for (const p of roster) {
+      if (p.isHero && p.seat !== seat) {
+        await Players.update(p.id, { isHero: false });
+      }
     }
+    const target = roster.find((p) => p.seat === seat);
+    if (target) await Players.update(target.id, { isHero: true });
+    await Sessions.update(session.id, { heroSeat: seat });
+    setShowHero(false);
   };
 
   const ready =
@@ -103,10 +148,7 @@ export default function Setup() {
         startStack: p.stack ?? 0,
         posted: p.mustPostBB
           ? [
-              {
-                kind: "post" as const,
-                amount: session.bb,
-              },
+              { kind: "post" as const, amount: session.bb },
               ...(p.postWithAnte
                 ? [{ kind: "post_ante" as const, amount: session.bb * 0.5 }]
                 : []),
@@ -134,7 +176,6 @@ export default function Setup() {
       tags: [],
       finalized: false,
     });
-    // clear post flags after they're snapshotted
     for (const p of roster) {
       if (p.mustPostBB || p.postWithAnte) {
         await Players.update(p.id, { mustPostBB: false, postWithAnte: false });
@@ -143,16 +184,24 @@ export default function Setup() {
     nav(`/sessions/${session.id}/hands/${h.id}`);
   };
 
+  const heroPositionLabel = (() => {
+    if (session.heroSeat === null) return "—";
+    return positions.get(session.heroSeat) ?? `S${session.heroSeat}`;
+  })();
+
   return (
     <div className="min-h-screen flex flex-col">
       <div className="flex items-center px-3 py-2 border-b border-neutral-800">
-        <div className="text-emerald-400 text-sm">v2 β</div>
+        <button onClick={() => nav("/review")} className="text-emerald-400 text-sm">
+          履歴
+        </button>
         <div className="flex-1 text-center font-bold">Cash Setup</div>
         <button
-          onClick={() => nav("/review")}
-          className="text-xs px-2 py-1 bg-neutral-800 rounded"
+          onClick={() => setShowEditTable(true)}
+          className="text-emerald-400 text-lg px-2"
+          title="Edit Poker Table"
         >
-          履歴
+          👥
         </button>
       </div>
 
@@ -166,53 +215,111 @@ export default function Setup() {
           aspectRatio="5/4"
           onTapSeat={onTapSeat}
         />
+        {assignBtnMode && (
+          <div className="bg-neutral-900/95 border border-neutral-800 rounded p-3 mt-2 text-center">
+            <div className="text-sm font-bold">座席をタップして BTN を割り当て</div>
+            <button
+              onClick={() => setAssignBtnMode(false)}
+              className="mt-2 px-3 py-1 bg-neutral-800 rounded text-xs"
+            >
+              キャンセル
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="p-3 space-y-2">
-        <div className="text-xs text-neutral-400">
-          席タップ：未指定→Hero、Hero→BTN、両方→クリア
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <div
-            className={`rounded p-2 text-center ${
-              session.heroSeat !== null
-                ? "bg-felt-900/40 border border-felt-700"
-                : "bg-amber-900/40 border border-amber-700"
-            }`}
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            onClick={() => setShowBlinds(true)}
+            className="py-3 rounded bg-blue-500 font-bold text-sm"
           >
-            <div className="text-[10px] text-neutral-400">Hero（必須）</div>
-            <div className="font-bold">
-              {session.heroSeat !== null ? `S${session.heroSeat}` : "未設定"}
-            </div>
-          </div>
-          <div
-            className={`rounded p-2 text-center ${
-              session.buttonSeat !== null
-                ? "bg-yellow-900/40 border border-yellow-700"
-                : "bg-amber-900/40 border border-amber-700"
-            }`}
+            Blinds
+            <br />
+            <span className="text-base">{session.sb} / {session.bb}</span>
+          </button>
+          <button
+            onClick={async () => {
+              await Sessions.update(session.id, {
+                autoStraddle: !session.autoStraddle,
+              });
+            }}
+            className={`py-3 rounded font-bold text-sm ${session.autoStraddle ? "bg-emerald-700" : "bg-neutral-700"}`}
           >
-            <div className="text-[10px] text-neutral-400">BTN（必須）</div>
-            <div className="font-bold">
-              {session.buttonSeat !== null ? `S${session.buttonSeat}` : "未設定"}
-            </div>
-          </div>
+            Straddle
+            <br />
+            <span className="text-base">{session.autoStraddle ? "ON" : "OFF"}</span>
+          </button>
+          <button
+            onClick={async () => {
+              const next = session.ante > 0 ? 0 : session.bb;
+              await Sessions.update(session.id, { ante: next });
+            }}
+            className={`py-3 rounded font-bold text-sm ${session.ante > 0 ? "bg-blue-700" : "bg-neutral-700"}`}
+          >
+            BB Ante
+            <br />
+            <span className="text-base">{session.ante > 0 ? session.ante : "OFF"}</span>
+          </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          <div className="rounded bg-blue-900/40 border border-blue-700 p-2 text-center">
-            <div className="text-[10px] text-neutral-300">Blinds</div>
-            <div className="font-bold">{session.sb} / {session.bb}</div>
-          </div>
-          <div
-            className={`rounded p-2 text-center ${session.autoStraddle ? "bg-emerald-900/40 border border-emerald-700" : "bg-neutral-800 border border-neutral-700"}`}
+        <div className="flex items-center gap-2">
+          <div className="text-xs text-neutral-400">Move BTN:</div>
+          <button
+            onClick={() => moveBtn("ccw")}
+            className="flex-1 py-2 bg-neutral-800 rounded text-sm"
           >
-            <div className="text-[10px] text-neutral-300">Straddle</div>
-            <div className="font-bold">{session.autoStraddle ? "ON" : "OFF"}</div>
+            ↺ CCW
+          </button>
+          <button
+            onClick={() => moveBtn("cw")}
+            className="flex-1 py-2 bg-neutral-800 rounded text-sm"
+          >
+            ↻ CW
+          </button>
+          <button
+            onClick={() => setAssignBtnMode(true)}
+            className="flex-1 py-2 bg-neutral-800 rounded text-sm text-emerald-400"
+          >
+            ➤ Assign
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setShowAdjustAll(true)}
+            className="py-2 bg-neutral-800 rounded text-sm"
+          >
+            Adjust All Stacks
+          </button>
+          <button
+            onClick={() => setShowHero(true)}
+            className="py-2 bg-neutral-800 rounded text-sm"
+          >
+            Hero: <span className="text-emerald-400 font-bold">{heroPositionLabel}</span> ▾
+          </button>
+        </div>
+
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
+          <div>
+            <label>日付</label>
+            <input
+              type="date"
+              value={session.date}
+              onChange={async (e) => {
+                await Sessions.update(session.id, { date: e.target.value });
+              }}
+            />
           </div>
-          <div className="rounded bg-neutral-800 border border-neutral-700 p-2 text-center">
-            <div className="text-[10px] text-neutral-300">Ante</div>
-            <div className="font-bold">{session.ante || "—"}</div>
+          <div>
+            <label>カジノ / ロケーション</label>
+            <input
+              value={session.casino}
+              placeholder="例: Bellagio"
+              onChange={async (e) => {
+                await Sessions.update(session.id, { casino: e.target.value });
+              }}
+            />
           </div>
         </div>
 
@@ -225,11 +332,105 @@ export default function Setup() {
               : "bg-neutral-800 opacity-60"
           }`}
         >
-          {ready
-            ? "Start Hand ▶"
-            : "Hero と BTN を席タップで選んでください"}
+          {ready ? "Start Hand ▶" : "Hero と BTN を選んでください"}
         </button>
       </div>
+
+      {editingSeat !== null && (() => {
+        const p = roster.find((x) => x.seat === editingSeat);
+        if (!p) return null;
+        return (
+          <PlayerEditSheet
+            seat={editingSeat}
+            player={p}
+            bb={session.bb}
+            suggestions={nameSuggestions ?? []}
+            onClose={() => setEditingSeat(null)}
+            onSave={async (patch) => {
+              await Players.update(p.id, patch);
+              setEditingSeat(null);
+            }}
+            onSitOut={async () => {
+              await Players.update(p.id, { isAway: !p.isAway });
+              setEditingSeat(null);
+            }}
+          />
+        );
+      })()}
+
+      {showBlinds && (
+        <BlindsSheet
+          sb={session.sb}
+          bb={session.bb}
+          onCancel={() => setShowBlinds(false)}
+          onSave={async (sb, bb) => {
+            await Sessions.update(session.id, { sb, bb });
+            setShowBlinds(false);
+          }}
+        />
+      )}
+
+      {showHero && (
+        <HeroPositionSheet
+          activeSeats={activeSeats}
+          buttonSeat={session.buttonSeat}
+          positions={positions}
+          currentHero={session.heroSeat}
+          onCancel={() => setShowHero(false)}
+          onPick={setHero}
+        />
+      )}
+
+      {showAdjustAll && (
+        <AdjustAllSheet
+          bb={session.bb}
+          onCancel={() => setShowAdjustAll(false)}
+          onApply={async (stack) => {
+            for (const p of roster) await Players.update(p.id, { stack });
+            setShowAdjustAll(false);
+          }}
+        />
+      )}
+
+      {showEditTable && (
+        <EditTableSheet
+          players={roster}
+          buttonSeat={session.buttonSeat}
+          positions={positions}
+          suggestions={nameSuggestions ?? []}
+          onClose={() => setShowEditTable(false)}
+          onUpdate={async (seat, patch) => {
+            const p = roster.find((x) => x.seat === seat);
+            if (p) await Players.update(p.id, patch);
+          }}
+          onAdd={async () => {
+            const max = roster.length > 0 ? Math.max(...roster.map((p) => p.seat)) : 0;
+            if (max >= 11) return;
+            await Players.create({
+              sessionId: session.id,
+              seat: max + 1,
+              name: "Unknown",
+              isHero: false,
+              isAway: false,
+              mustPostBB: false,
+              postWithAnte: false,
+              stack: 200,
+              note: "",
+            });
+            await Sessions.update(session.id, { seatCount: max + 1 });
+          }}
+          onRemove={async () => {
+            if (roster.length <= 2) return;
+            const last = roster[roster.length - 1];
+            await Players.remove(last.id);
+            await Sessions.update(session.id, {
+              seatCount: roster.length - 1,
+              ...(last.isHero ? { heroSeat: null } : {}),
+              ...(last.seat === session.buttonSeat ? { buttonSeat: null } : {}),
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
