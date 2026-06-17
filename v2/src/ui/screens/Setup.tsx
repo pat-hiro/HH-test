@@ -14,6 +14,8 @@ import {
   HeroPositionSheet,
   PlayerEditSheet,
 } from "../components/SetupSheets";
+import BankrollEntrySheet from "../components/BankrollEntrySheet";
+import { Bankroll } from "../../data/repo";
 import { positionLabels } from "../positions";
 
 const COMMON_CURRENCIES = ["JPY", "USD", "EUR", "GBP", "CNY", "KRW", "AUD"];
@@ -67,6 +69,7 @@ export default function Setup() {
   const [showHero, setShowHero] = useState(false);
   const [showAdjustAll, setShowAdjustAll] = useState(false);
   const [showEditTable, setShowEditTable] = useState(false);
+  const [showEndSession, setShowEndSession] = useState(false);
 
   const activeSeats = useMemo(
     () =>
@@ -78,6 +81,36 @@ export default function Setup() {
     () => positionLabels(activeSeats, session?.buttonSeat ?? null),
     [activeSeats, session?.buttonSeat]
   );
+
+  // For the End-Session bankroll prefill, compute Hero's session aggregate:
+  //  - cashOut  = Hero's current stack (carried across hands by Next Hand)
+  //  - buyInTotal = same starting amount, IF a bankroll row already exists for
+  //    this session we re-use the user's prior buy-in input; otherwise default
+  //    to Hero's stack at hand #1.
+  const sessionHands = useLiveQuery(
+    () =>
+      sessionId
+        ? db.hands
+            .where("sessionId")
+            .equals(sessionId)
+            .toArray()
+            .then((hs) => hs.filter((h) => h.deletedAt === null))
+        : [],
+    [sessionId]
+  );
+  const existingBankroll = useLiveQuery(
+    () => (sessionId ? Bankroll.forSession(sessionId) : undefined),
+    [sessionId]
+  );
+  const heroSeatNum = roster?.find((p) => p.isHero)?.seat ?? null;
+  const heroFirstStack = (() => {
+    if (heroSeatNum === null || !sessionHands || sessionHands.length === 0) return 0;
+    const sorted = [...sessionHands].sort((a, b) => a.handNo - b.handNo);
+    const first = sorted[0];
+    return first.seats.find((s) => s.seat === heroSeatNum)?.startStack ?? 0;
+  })();
+  const heroCurrentStack =
+    roster?.find((p) => p.seat === heroSeatNum)?.stack ?? heroFirstStack;
 
   if (!session || !roster) {
     return (
@@ -443,6 +476,18 @@ export default function Setup() {
         >
           {ready ? "Start Hand ▶" : "Hero と BTN を選んでください"}
         </button>
+
+        {(sessionHands?.length ?? 0) > 0 && (
+          <button
+            onClick={() => setShowEndSession(true)}
+            className="w-full py-3 mt-1 rounded font-bold text-sm bg-rose-700 hover:bg-rose-800"
+          >
+            🏁 セッション終了 (収支記録)
+            {existingBankroll && (
+              <span className="text-xs opacity-80 ml-2">（記録済 — 編集）</span>
+            )}
+          </button>
+        )}
       </div>
 
       {editingSeat !== null && (() => {
@@ -550,6 +595,47 @@ export default function Setup() {
               ...(last.seat === session.buttonSeat ? { buttonSeat: null } : {}),
             });
           }}
+        />
+      )}
+
+      {showEndSession && (
+        <BankrollEntrySheet
+          mode={existingBankroll ? "edit" : "create"}
+          kind="SESSION"
+          baseCurrency={session.currency}
+          sessions={[session]}
+          initial={existingBankroll}
+          onCancel={() => setShowEndSession(false)}
+          onSave={async (draft) => {
+            if (existingBankroll) {
+              await Bankroll.update(existingBankroll.id, draft);
+            } else {
+              await Bankroll.create({
+                ...draft,
+                sessionId: session.id,
+                location: draft.location || session.casino,
+                stakes: draft.stakes || `${session.sb}/${session.bb}`,
+                gameType: draft.gameType || session.gameType,
+                currency: draft.currency || session.currency,
+                buyInTotal:
+                  draft.buyInTotal > 0 ? draft.buyInTotal : heroFirstStack,
+                cashOut: draft.cashOut > 0 ? draft.cashOut : heroCurrentStack,
+                startAt: draft.startAt ?? session.startedAt,
+                endAt: draft.endAt ?? Date.now(),
+              });
+            }
+            await Sessions.update(session.id, { endedAt: Date.now() });
+            setShowEndSession(false);
+            nav("/bankroll");
+          }}
+          onDelete={
+            existingBankroll
+              ? async () => {
+                  await Bankroll.remove(existingBankroll.id);
+                  setShowEndSession(false);
+                }
+              : undefined
+          }
         />
       )}
     </div>

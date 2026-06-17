@@ -170,6 +170,86 @@ describe("a normal multiway street resolves correctly", () => {
   });
 });
 
+describe("partial all-in (under-raise) does NOT reopen action", () => {
+  it("a sub-min-raise all-in lets seats already matched at the prior level call only — not re-raise", () => {
+    // 9-max: stacks 200 by default, override seat 8 (UTG+3 / LJ in 9-max
+    // labels) to a tiny stack so its all-in is below a full min raise.
+    const tiny: SeatSetup[] = nineSeats.map((s) =>
+      s.seat === 8 ? { ...s, startStack: 8 } : s
+    );
+    const setup = makeSetup({
+      seats: tiny,
+      seatCount: 9,
+      buttonSeat: 1,
+      sb: 1,
+      bb: 2,
+    });
+    // UTG opens to 6 (raise increment 4), seat 8 jams its remaining 8 chips
+    // (raise increment from 6 → 8 = 2, which is LESS than the 4 reopen size).
+    const { states, final } = simulate(setup, [
+      { seat: 4, type: "raise", to: 6 }, // UTG opens 6
+      { seat: 5, type: "fold" },
+      { seat: 6, type: "fold" },
+      { seat: 7, type: "fold" },
+      { seat: 8, type: "allin" }, // jams 8 (partial — below full raise to 10)
+    ]);
+    expect(final.currentBet).toBe(8);
+    // The next-to-act is seat 9; new seat — they CAN raise normally.
+    expect(final.currentSeat).toBe(9);
+    expect(final.canRaise).toBe(true);
+
+    // Fold seat 9, BTN, SB. BB calls 8 (was at 2, owes 6).
+    const { final: afterBB } = simulate(setup, [
+      { seat: 4, type: "raise", to: 6 },
+      { seat: 5, type: "fold" },
+      { seat: 6, type: "fold" },
+      { seat: 7, type: "fold" },
+      { seat: 8, type: "allin" },
+      { seat: 9, type: "fold" },
+      { seat: 1, type: "fold" },
+      { seat: 2, type: "fold" },
+      { seat: 3, type: "call" }, // BB calls 8
+    ]);
+    // Action returns to UTG (live = 6, currentBet = 8) — UTG must call 2 more
+    // or fold, but CANNOT re-raise (the under-raise didn't reopen action).
+    expect(afterBB.currentSeat).toBe(4);
+    expect(afterBB.toCall).toBe(2);
+    expect(afterBB.canRaise).toBe(false);
+
+    // After action 0 (UTG raises to 6), reopenedBet was 6, full raise = 4.
+    // After action 4 (seat 8 jams 8), reopenedBet should STILL be 6 (partial).
+    expect(states[5].reopenedBet).toBe(6);
+  });
+
+  it("a full raise after a partial all-in DOES reopen action again", () => {
+    const tiny: SeatSetup[] = nineSeats.map((s) =>
+      s.seat === 8 ? { ...s, startStack: 8 } : s
+    );
+    const setup = makeSetup({
+      seats: tiny,
+      seatCount: 9,
+      buttonSeat: 1,
+      sb: 1,
+      bb: 2,
+    });
+    // UTG opens 6, seat 8 jams 8 (partial), seat 9 re-raises to 20 (full).
+    // That's a 12-chip raise — > the original 4 — full raise → reopens.
+    const { final } = simulate(setup, [
+      { seat: 4, type: "raise", to: 6 },
+      { seat: 5, type: "fold" },
+      { seat: 6, type: "fold" },
+      { seat: 7, type: "fold" },
+      { seat: 8, type: "allin" },
+      { seat: 9, type: "raise", to: 20 },
+    ]);
+    expect(final.reopenedBet).toBe(20);
+    // Now everyone behind, including UTG, may re-raise again.
+    // First in line is seat 1 (BTN).
+    expect(final.currentSeat).toBe(1);
+    expect(final.canRaise).toBe(true);
+  });
+});
+
 describe("v2 regression: action moves clockwise from the most recent actor", () => {
   it("right after UTG limps + UTG+1 raises, action is on UTG+2 — NOT the limper", () => {
     const setup = base(); // 9-max, BTN=1, SB=2, BB=3, UTG=4

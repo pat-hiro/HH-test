@@ -439,6 +439,17 @@ export default function Hand() {
   );
   const sharesRemainder = state.pot - sharesTotal;
 
+  /** auto-assign a single side pot to one winner (overwrites that seat's
+   *  current share by adding the pot's amount; existing shares for other
+   *  seats are kept). */
+  const assignSidePot = (potAmount: number, winnerSeat: number) => {
+    setShares((prev) => {
+      const cur = parseFloat(prev[winnerSeat] ?? "0") || 0;
+      return { ...prev, [winnerSeat]: String(cur + potAmount) };
+    });
+  };
+  const clearShares = () => setShares({});
+
   const setShare = (seat: number, v: string) =>
     setShares((prev) => ({ ...prev, [seat]: v }));
   const assignAllTo = (seat: number) =>
@@ -560,9 +571,13 @@ export default function Hand() {
   const canBet =
     state.currentBet === 0 && state.currentSeat !== null && !boardBlocked;
   // BB option / facing a raise — both allow Raise. Show alongside Check when
-  // there's a live bet but I owe nothing (e.g., BB in a limped pot).
+  // there's a live bet but I owe nothing (e.g., BB in a limped pot). Suppressed
+  // when state.canRaise is false (e.g., facing a partial all-in: call only).
   const canRaise =
-    state.currentBet > 0 && state.currentSeat !== null && !boardBlocked;
+    state.currentBet > 0 &&
+    state.currentSeat !== null &&
+    !boardBlocked &&
+    state.canRaise;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -622,6 +637,49 @@ export default function Hand() {
                 />
                 ショーダウンに行った
               </label>
+
+              {state.sidePots.length > 1 && (
+                <div className="bg-neutral-950/50 border border-neutral-800 rounded p-2 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-bold text-amber-300">
+                      サイドポット ({state.sidePots.length}層)
+                    </div>
+                    <button
+                      onClick={clearShares}
+                      className="text-[10px] text-neutral-400 underline"
+                    >
+                      クリア
+                    </button>
+                  </div>
+                  {state.sidePots.map((sp, idx) => (
+                    <div key={idx} className="space-y-1">
+                      <div className="text-[11px] text-neutral-300">
+                        {idx === 0 ? "Main" : `Side ${idx}`}: ${sp.amount}{" "}
+                        <span className="text-neutral-500">
+                          ({sp.eligible.map((s) => `S${s}`).join(", ")})
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {sp.eligible.map((seat) => {
+                          const snap = hand.seats.find((x) => x.seat === seat);
+                          return (
+                            <button
+                              key={seat}
+                              onClick={() => assignSidePot(sp.amount, seat)}
+                              className="px-2 py-1 bg-neutral-800 rounded text-[10px]"
+                            >
+                              → S{seat} {snap?.name?.slice(0, 8) ?? ""}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-[10px] text-neutral-500">
+                    タップで勝者に加算（割れた場合は手で分割）
+                  </div>
+                </div>
+              )}
 
               <div className="text-xs text-neutral-400">勝者とポット配分</div>
               <ul className="space-y-1">

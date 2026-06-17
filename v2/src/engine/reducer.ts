@@ -117,11 +117,13 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
     // seed PF live commitments from forced LIVE bets
     let currentBet = 0;
     let lastRaiseSize = setup.bb; // floor for min-raise
+    let reopenedBet = 0; // bet level at which action was last (re)opened by a FULL raise
     if (street === "PF") {
       for (const f of setup.forced) {
         if (f.live) live[f.seat] = (live[f.seat] ?? 0) + f.amount;
       }
       currentBet = Math.max(0, ...Object.values(live));
+      reopenedBet = currentBet; // BB/straddle is the opening "raise"
       // the opening "bet" preflop is the big blind (or straddle): min reopen = 2x
       lastRaiseSize = currentBet > 0 ? currentBet : setup.bb;
     }
@@ -147,7 +149,16 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
         spentTotal[a.seat] = (spentTotal[a.seat] ?? 0) + a.amount;
         if (live[a.seat] > currentBet) {
           const raiseSize = live[a.seat] - currentBet;
-          lastRaiseSize = Math.max(raiseSize, setup.bb);
+          const isFullRaise = raiseSize >= lastRaiseSize;
+          if (isFullRaise) {
+            // a full raise reopens action: anyone with live[s] < new currentBet
+            // must act again AND may legally re-raise.
+            lastRaiseSize = raiseSize;
+            reopenedBet = live[a.seat];
+          }
+          // a partial (under-)raise (all-in for less than the min raise) still
+          // raises currentBet, but reopenedBet stays at the previous level so
+          // seats already matched at that level can call only, not re-raise.
           currentBet = live[a.seat];
           lastAggressor = a.seat;
         }
@@ -218,6 +229,12 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
     if (!streetComplete) {
       const toCall = Math.max(0, currentBet - (live[currentSeat as number] ?? 0));
       const minRaiseTo = currentBet + lastRaiseSize;
+      // Reopen rule: a seat that has already matched the reopenedBet cannot
+      // re-raise. Only seats that haven't acted, or whose live commitment was
+      // below the reopenedBet, may raise.
+      const currentLive = live[currentSeat as number] ?? 0;
+      const canRaiseNow =
+        !acted.has(currentSeat as number) || currentLive < reopenedBet;
       view = {
         street,
         currentBet,
@@ -234,6 +251,8 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
         streetComplete: false,
         handComplete: false,
         sidePots: computeSidePots(spentTotal, folded),
+        reopenedBet,
+        canRaise: canRaiseNow,
       };
       return view;
     }
@@ -292,6 +311,8 @@ function finalize(
     streetComplete: partial.streetComplete,
     handComplete: partial.handComplete,
     sidePots: computeSidePots(partial.spentTotal, partial.folded),
+    reopenedBet: 0,
+    canRaise: false,
   };
 }
 

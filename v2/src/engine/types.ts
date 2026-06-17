@@ -79,4 +79,11 @@ export interface HandState {
   streetComplete: boolean;
   handComplete: boolean;
   sidePots: SidePot[];
+  /** bet level at which action was last (re)opened by a FULL raise. A seat
+   *  whose previous live commitment is already at this level may only call or
+   *  fold — not re-raise — when facing a partial all-in. */
+  reopenedBet: number;
+  /** true if the seat currently to act has been re-opened: i.e. they can
+   *  legally raise. False under partial-all-in lockdown. */
+  canRaise: boolean;
 }
