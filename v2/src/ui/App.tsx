@@ -9,6 +9,14 @@ import SettingsScreen from "./screens/Settings";
 import TabBar from "./components/TabBar";
 import { db } from "../data/db";
 
+// Force a fresh component instance per handId so local state (sheets,
+// promptedRef, knownCards, shares) can't bleed from the previous hand into
+// the next one when nextHand() navigates.
+function HandWrapper() {
+  const params = useParams();
+  return <Hand key={params.handId ?? ""} />;
+}
+
 function WithTabBar({ children }: { children: React.ReactNode }) {
   const params = useParams();
   const fromUrl = params.sessionId ?? null;
@@ -33,7 +41,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Entry />} />
         <Route path="/sessions/:sessionId/setup" element={<WithTabBar><Setup /></WithTabBar>} />
-        <Route path="/sessions/:sessionId/hands/:handId" element={<WithTabBar><Hand /></WithTabBar>} />
+        <Route path="/sessions/:sessionId/hands/:handId" element={<WithTabBar><HandWrapper /></WithTabBar>} />
         <Route path="/review" element={<WithTabBar><Review /></WithTabBar>} />
         <Route path="/bankroll" element={<WithTabBar><Bankroll /></WithTabBar>} />
         <Route path="/settings" element={<WithTabBar><SettingsScreen /></WithTabBar>} />

@@ -172,6 +172,7 @@ export function PlayerEditSheet({
   seat,
   player,
   bb,
+  ante,
   suggestions,
   onClose,
   onSave,
@@ -180,6 +181,8 @@ export function PlayerEditSheet({
   seat: number;
   player: SessionPlayer;
   bb: number;
+  /** configured BB-ante in chips; drives the "1BB + ante" post label */
+  ante: number;
   suggestions: string[];
   onClose: () => void;
   onSave: (patch: Partial<SessionPlayer>) => void;
@@ -235,9 +238,13 @@ export function PlayerEditSheet({
               </button>
               <button
                 onClick={() => setPostMode("bb_ante")}
-                className={`py-2 rounded text-sm ${postMode === "bb_ante" ? "bg-blue-500" : "bg-neutral-800"}`}
+                disabled={ante <= 0}
+                className={`py-2 rounded text-sm ${
+                  postMode === "bb_ante" ? "bg-blue-500" : "bg-neutral-800"
+                } disabled:opacity-40`}
+                title={ante <= 0 ? "BBアンテ未設定" : ""}
               >
-                1BB + 0.5
+                {ante > 0 ? `1BB + ${ante}（ante）` : "1BB + ante"}
               </button>
             </div>
           </div>

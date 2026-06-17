@@ -57,16 +57,17 @@ export default function Bankroll() {
     const hourly = sessionMinutes > 0 ? (sessionNet / sessionMinutes) * 60 : null;
     const wins = sessionEntries.filter((e) => entryNet(e) > 0).length;
     const losses = sessionEntries.filter((e) => entryNet(e) < 0).length;
+    // Win rate excludes break-even sessions from BOTH the numerator and the
+    // denominator so the rendered "% (wins/wins+losses)" pair is internally
+    // consistent. A pure break-even history shows "—".
+    const decided = wins + losses;
     return {
       total,
       sessionCount: sessionEntries.length,
       sessionNet,
       hourly,
       hours: sessionMinutes / 60,
-      winRate:
-        sessionEntries.length > 0
-          ? (wins / sessionEntries.length) * 100
-          : null,
+      winRate: decided > 0 ? (wins / decided) * 100 : null,
       wins,
       losses,
     };

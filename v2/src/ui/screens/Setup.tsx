@@ -143,13 +143,25 @@ export default function Setup() {
     previewBb !== null
       ? nextActive(previewBb, session.seatCount, activeSeats)
       : null;
+  // Miss-blind posts contribute to the seeded pot too — without them the
+  // preview number disagrees with what gets actually posted on Start Hand.
+  const previewPosts = roster
+    .filter((p) => activeSeats.includes(p.seat) && p.mustPostBB)
+    .reduce(
+      (sum, p) =>
+        sum + session.bb + (p.postWithAnte && session.ante > 0 ? session.ante : 0),
+      0
+    );
   const previewPot =
     (previewSb !== null ? session.sb : 0) +
     (previewBb !== null ? session.bb : 0) +
     (session.autoStraddle && previewUtg !== null
-      ? (session.straddleAmount > 0 ? session.straddleAmount : session.bb * 2)
+      ? session.straddleAmount > 0
+        ? session.straddleAmount
+        : session.bb * 2
       : 0) +
-    (previewBb !== null ? session.ante : 0);
+    (previewBb !== null ? session.ante : 0) +
+    previewPosts;
 
   const seatsVM: SeatVM[] = roster.map((p) => ({
     seat: p.seat,
@@ -312,8 +324,12 @@ export default function Setup() {
         posted: p.mustPostBB
           ? [
               { kind: "post" as const, amount: session.bb },
-              ...(p.postWithAnte
-                ? [{ kind: "post_ante" as const, amount: session.bb * 0.5 }]
+              // The dead post-ante a returning player owes is the same as the
+              // table's BB-ante — not a fixed half-BB (which is one common
+              // house rule but far from universal). If no ante is configured
+              // we still skip this row even when postWithAnte is set.
+              ...(p.postWithAnte && session.ante > 0
+                ? [{ kind: "post_ante" as const, amount: session.ante }]
                 : []),
             ]
           : [],
@@ -599,6 +615,7 @@ export default function Setup() {
             seat={editingSeat}
             player={p}
             bb={session.bb}
+            ante={session.ante}
             suggestions={nameSuggestions ?? []}
             onClose={() => setEditingSeat(null)}
             onSave={async (patch) => {

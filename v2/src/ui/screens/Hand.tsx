@@ -644,15 +644,30 @@ export default function Hand() {
     setShares((prev) => ({ ...prev, [seat]: v }));
   const assignAllTo = (seat: number) =>
     setShares({ [seat]: String(state.pot) });
+  /** Split each SIDE POT evenly among that pot's eligible survivors. With no
+   *  side pots (or a single-tier main pot) this collapses to the obvious
+   *  "split the whole pot" behaviour, but when a short stack is all-in it
+   *  correctly excludes them from side pots they can't win. */
   const splitEvenly = () => {
     if (survivors.length === 0) return;
-    const each = Math.floor(state.pot / survivors.length);
-    const rem = state.pot - each * survivors.length;
-    const m: Record<number, string> = {};
-    survivors.forEach((s, i) => {
-      m[s] = String(each + (i === 0 ? rem : 0));
-    });
-    setShares(m);
+    const survSet = new Set(survivors);
+    const m: Record<number, number> = {};
+    for (const s of survivors) m[s] = 0;
+    const pots = state.sidePots.length > 0
+      ? state.sidePots
+      : [{ amount: state.pot, eligible: survivors }];
+    for (const pot of pots) {
+      const winners = pot.eligible.filter((s) => survSet.has(s));
+      if (winners.length === 0) continue;
+      const each = Math.floor(pot.amount / winners.length);
+      const rem = pot.amount - each * winners.length;
+      winners.forEach((s, i) => {
+        m[s] += each + (i === 0 ? rem : 0);
+      });
+    }
+    const out: Record<number, string> = {};
+    for (const s of Object.keys(m).map(Number)) out[s] = String(m[s]);
+    setShares(out);
   };
 
   const foldAll = () =>
@@ -730,6 +745,21 @@ export default function Hand() {
 
   const nextHand = async () => {
     const winners = buildWinners();
+    const winTotal = winners.reduce((s, w) => s + w.amount, 0);
+    // Never persist a hand whose recorded pay-outs don't match the pot — that
+    // miscount silently corrupts every downstream stack delta. Warn-confirm
+    // instead of failing silently so the user can still proceed (e.g. when
+    // they intentionally don't know who won a side pot).
+    if (winTotal !== state.pot) {
+      const diff = state.pot - winTotal;
+      const sign = diff > 0 ? "+" : "";
+      if (
+        !confirm(
+          `配分の合計がポットと一致しません（差: ${sign}${diff}）。このまま次のハンドへ進みますか？`
+        )
+      )
+        return;
+    }
     const knownArr = Object.entries(knownCards).map(([seat, cards]) => ({
       seat: Number(seat),
       cards,
@@ -810,13 +840,45 @@ export default function Hand() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Top row — dedicated to the Session Setup back link so it's hard to
+          confuse with the undo buttons below. */}
+      <div className="flex items-center px-3 py-1.5 border-b border-neutral-900">
+        <button
+          onClick={() => nav(`/sessions/${session.id}/setup`)}
+          className="text-emerald-400 text-sm font-semibold"
+        >
+          ‹ Session Setup
+        </button>
+        <div className="ml-auto text-xs text-neutral-500">
+          Hand #{hand.handNo}
+        </div>
+      </div>
+      {/* Action row — undo buttons take the leftmost slot (most-used during
+          play), then the street label, then settings. */}
       <div className="flex items-center px-3 py-2 border-b border-neutral-800">
-        <button onClick={() => nav(`/sessions/${session.id}/setup`)} className="text-emerald-400 text-lg">‹</button>
-        <button onClick={undoStreet} title="1ストリート戻す" className="ml-2 text-rose-400 text-lg">⏮</button>
-        <button onClick={undo} title="1アクション戻す" className="ml-1 text-rose-400 text-lg">↶</button>
-        <div className="flex-1 text-center font-bold tracking-wider">{streetTitle(state.street)}</div>
-        <button onClick={() => nav("/settings")} className="text-neutral-300 text-sm px-2">⚙</button>
-        <div className="text-xs text-neutral-500">#{hand.handNo}</div>
+        <button
+          onClick={undoStreet}
+          title="1ストリート戻す"
+          className="text-rose-400 text-lg"
+        >
+          ⏮
+        </button>
+        <button
+          onClick={undo}
+          title="1アクション戻す"
+          className="ml-1 text-rose-400 text-lg"
+        >
+          ↶
+        </button>
+        <div className="flex-1 text-center font-bold tracking-wider">
+          {streetTitle(state.street)}
+        </div>
+        <button
+          onClick={() => nav("/settings")}
+          className="text-neutral-300 text-sm px-2"
+        >
+          ⚙
+        </button>
       </div>
 
       <div className="px-2 pt-2">
@@ -970,72 +1032,89 @@ export default function Hand() {
                     ショウダウンで見えたカードをタップで入力（覚えていないところは空欄でOK）
                   </div>
                   <div className="space-y-2">
-                    {survivors
-                      .filter((s) => s !== heroSeat)
-                      .map((s) => {
-                        const snap = hand.seats.find((x) => x.seat === s);
-                        const kc = knownCards[s];
-                        const pos = positions.get(s) ?? "";
-                        return (
-                          <button
-                            key={s}
-                            onClick={() => setKnownCardsSeat(s)}
-                            className={`w-full flex items-center gap-3 rounded p-2 border ${
-                              kc
-                                ? "bg-neutral-900 border-emerald-700"
-                                : "bg-neutral-950/40 border-neutral-800"
-                            }`}
-                          >
-                            <div className="flex gap-0.5">
-                              <PlayingCard
-                                card={kc?.[0] ?? null}
-                                size="sm"
-                                faceDown={!kc}
-                              />
-                              <PlayingCard
-                                card={kc?.[1] ?? null}
-                                size="sm"
-                                faceDown={!kc}
-                              />
-                            </div>
-                            <div className="flex-1 text-left">
-                              <div className="text-sm font-semibold">
-                                S{s}{" "}
-                                <span className="text-neutral-300 font-normal">
-                                  {snap?.name ?? ""}
+                    {survivors.map((s) => {
+                      const isHero = s === heroSeat;
+                      const snap = hand.seats.find((x) => x.seat === s);
+                      // Hero's cards live on hand.heroCards (input/edited via
+                      // the Hero card sheet). Everyone else uses knownCards.
+                      const cards: [string, string] | null = isHero
+                        ? hand.heroCards
+                        : knownCards[s] ?? null;
+                      const pos = positions.get(s) ?? "";
+                      const onTap = () =>
+                        isHero ? setHeroCardsOpen(true) : setKnownCardsSeat(s);
+                      const onClear = () => {
+                        if (isHero) {
+                          void Hands.update(hand.id, { heroCards: null });
+                        } else {
+                          setKnownCards((prev) => {
+                            const next = { ...prev };
+                            delete next[s];
+                            return next;
+                          });
+                        }
+                      };
+                      return (
+                        <button
+                          key={s}
+                          onClick={onTap}
+                          className={`w-full flex items-center gap-3 rounded p-2 border ${
+                            cards
+                              ? isHero
+                                ? "bg-neutral-900 border-yellow-700"
+                                : "bg-neutral-900 border-emerald-700"
+                              : "bg-neutral-950/40 border-neutral-800"
+                          }`}
+                        >
+                          <div className="flex gap-0.5">
+                            <PlayingCard
+                              card={cards?.[0] ?? null}
+                              size="sm"
+                              faceDown={!cards}
+                            />
+                            <PlayingCard
+                              card={cards?.[1] ?? null}
+                              size="sm"
+                              faceDown={!cards}
+                            />
+                          </div>
+                          <div className="flex-1 text-left">
+                            <div className="text-sm font-semibold">
+                              {isHero && (
+                                <span className="text-yellow-300">★ </span>
+                              )}
+                              S{s}{" "}
+                              <span className="text-neutral-300 font-normal">
+                                {isHero ? "Hero" : snap?.name ?? ""}
+                              </span>
+                              {pos && (
+                                <span className="text-[10px] text-neutral-500 ml-2">
+                                  {pos}
                                 </span>
-                                {pos && (
-                                  <span className="text-[10px] text-neutral-500 ml-2">
-                                    {pos}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[10px] text-neutral-400">
-                                {kc ? "カードを編集" : "タップで入力"}
-                              </div>
+                              )}
                             </div>
-                            {kc && (
-                              <div
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setKnownCards((prev) => {
-                                    const next = { ...prev };
-                                    delete next[s];
-                                    return next;
-                                  });
-                                }}
-                                className="text-rose-400 text-xs px-2"
-                                role="button"
-                              >
-                                ✕
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    {survivors.filter((s) => s !== heroSeat).length === 0 && (
+                            <div className="text-[10px] text-neutral-400">
+                              {cards ? "カードを編集" : "タップで入力"}
+                            </div>
+                          </div>
+                          {cards && (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onClear();
+                              }}
+                              className="text-rose-400 text-xs px-2"
+                              role="button"
+                            >
+                              ✕
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {survivors.length === 0 && (
                       <div className="text-xs text-neutral-500 text-center py-2">
-                        Hero 以外のショウダウン参加者がいません
+                        ショウダウン参加者がいません
                       </div>
                     )}
                   </div>

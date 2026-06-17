@@ -62,10 +62,30 @@ export default function BankrollEntrySheet({
     endAt: mergeDateTime(endDate, endTime),
   });
 
+  // Rate guarantee: when the entry is already IN the base currency the rate
+  // must be 1 (the label reads "1 X = ? Y" so a stray 0 or non-1 would zero
+  // out / mis-scale the row's contribution to totals). Otherwise the rate
+  // must be a positive number — 0 silently drops the row from base totals.
+  const isBase =
+    draft.currency.length === 3 &&
+    baseCurrency.length === 3 &&
+    draft.currency === baseCurrency;
+  const rateValid = isBase
+    ? draft.exchangeRate === 1
+    : Number.isFinite(draft.exchangeRate) && draft.exchangeRate > 0;
+
   const save = async () => {
     const final = commitTimes();
     if (final.startAt === null && kind === "SESSION") {
       alert("開始日時を入力してください");
+      return;
+    }
+    if (!rateValid) {
+      alert(
+        isBase
+          ? "基準通貨の場合、為替レートは 1 にしてください"
+          : "為替レートは 0 より大きい値を入力してください"
+      );
       return;
     }
     await onSave(final);
@@ -105,19 +125,48 @@ export default function BankrollEntrySheet({
             <label>通貨</label>
             <input
               value={draft.currency}
-              onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase().slice(0, 3) })}
+              onChange={(e) => {
+                const next = e.target.value.toUpperCase().slice(0, 3);
+                // When the user switches the entry's currency TO the base,
+                // also snap the rate to 1 so we don't carry over a stale
+                // foreign rate that would multiply the base total wrongly.
+                const sameAsBase = next.length === 3 && next === baseCurrency;
+                setDraft({
+                  ...draft,
+                  currency: next,
+                  exchangeRate: sameAsBase ? 1 : draft.exchangeRate,
+                });
+              }}
               maxLength={3}
             />
           </div>
           <div>
-            <label>1{draft.currency} = ? {baseCurrency}</label>
+            <label>
+              1{draft.currency || "—"} = ? {baseCurrency || "—"}
+            </label>
             <input
               type="number"
               inputMode="decimal"
+              step="0.0001"
+              min="0"
               onFocus={(e) => e.currentTarget.select()}
+              disabled={isBase}
               value={draft.exchangeRate}
-              onChange={(e) => setDraft({ ...draft, exchangeRate: parseFloat(e.target.value) || 0 })}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  // accept "" / partial input without forcing 0 — only the
+                  // save guard rejects non-positive rates.
+                  exchangeRate: e.target.value === "" ? 0 : parseFloat(e.target.value),
+                })
+              }
+              className={!rateValid ? "border border-rose-500" : ""}
             />
+            {isBase && (
+              <div className="text-[10px] text-neutral-500 mt-0.5">
+                基準通貨と同じ → 1 で固定
+              </div>
+            )}
           </div>
         </div>
 
