@@ -4,7 +4,12 @@
 // Every persisted entity carries:
 //   id        : UUID v4 (string) — stable across devices, generated locally
 //   updatedAt : epoch ms          — last-write timestamp (used for sync merges)
-//   deletedAt : epoch ms | null   — soft-delete tombstone (never hard-delete)
+//   deletedAt : epoch ms          — soft-delete tombstone (0 = alive, never
+//                                   hard-delete). 0 is used as a non-null
+//                                   sentinel so IndexedDB can actually INDEX
+//                                   the alive-row queries — Dexie can't index
+//                                   null keys, which made every read scan all
+//                                   tombstones in memory under the old schema.
 //
 // This shape lets us swap Dexie for Supabase in v1 with no migration:
 // every row already has the keys a cloud merge needs.
@@ -15,7 +20,7 @@ import type { Street } from "../engine/types";
 export interface Syncable {
   id: string;
   updatedAt: number;
-  deletedAt: number | null;
+  deletedAt: number; // 0 = alive, positive = epoch-ms it was tombstoned at
 }
 
 // ---------------------------------------------------------------------------

@@ -28,6 +28,9 @@ export function now(): number {
   return Date.now();
 }
 
+/** alive-row sentinel — see Syncable comment + db.ts upgrade for the why. */
+export const ALIVE = 0;
+
 /** mint a new row: id, updatedAt, deletedAt are set by the repo, not callers */
 export function newRow<T extends Syncable>(
   data: Omit<T, "id" | "updatedAt" | "deletedAt"> & Partial<Pick<T, "id">>
@@ -37,7 +40,7 @@ export function newRow<T extends Syncable>(
     ...(data as object),
     id: data.id ?? uuid(),
     updatedAt: t,
-    deletedAt: null,
+    deletedAt: ALIVE,
   } as T;
 }
 
@@ -71,11 +74,12 @@ async function softDelete<T extends Syncable>(
   await table.put({ ...existing, deletedAt: now(), updatedAt: now() });
 }
 
+/** Index-seek the alive rows directly (deletedAt === 0). Replaces the v1
+ *  "scan everything and JS-filter tombstones" pattern. */
 async function listAlive<T extends Syncable>(
   table: Table<T, string>
 ): Promise<T[]> {
-  const all = await table.toArray();
-  return all.filter((r) => r.deletedAt === null);
+  return table.where("deletedAt").equals(ALIVE).toArray();
 }
 
 // ---------------------------------------------------------------------------
@@ -107,12 +111,10 @@ export const Players = {
   remove: (id: string) => softDelete<SessionPlayer>(db.sessionPlayers, id),
   forSession: async (sessionId: string): Promise<SessionPlayer[]> => {
     const rows = await db.sessionPlayers
-      .where("sessionId")
-      .equals(sessionId)
+      .where("[sessionId+deletedAt]")
+      .equals([sessionId, ALIVE])
       .toArray();
-    return rows
-      .filter((r) => r.deletedAt === null)
-      .sort((a, b) => a.seat - b.seat);
+    return rows.sort((a, b) => a.seat - b.seat);
   },
 };
 
@@ -124,10 +126,11 @@ export const Hands = {
   remove: (id: string) => softDelete<Hand>(db.hands, id),
   get: (id: string) => db.hands.get(id),
   forSession: async (sessionId: string): Promise<Hand[]> => {
-    const rows = await db.hands.where("sessionId").equals(sessionId).toArray();
-    return rows
-      .filter((r) => r.deletedAt === null)
-      .sort((a, b) => a.handNo - b.handNo);
+    const rows = await db.hands
+      .where("[sessionId+deletedAt]")
+      .equals([sessionId, ALIVE])
+      .toArray();
+    return rows.sort((a, b) => a.handNo - b.handNo);
   },
   lastForSession: async (sessionId: string): Promise<Hand | undefined> => {
     const list = await Hands.forSession(sessionId);
@@ -156,10 +159,11 @@ export const Actions = {
     data: Omit<Action, "id" | "updatedAt" | "deletedAt" | "order">
   ): Promise<Action> =>
     db.transaction("rw", db.actions, async () => {
-      const rows = await db.actions.where("handId").equals(data.handId).toArray();
-      const maxOrder = rows
-        .filter((r) => r.deletedAt === null)
-        .reduce((m, r) => Math.max(m, r.order), -1);
+      const rows = await db.actions
+        .where("[handId+deletedAt]")
+        .equals([data.handId, ALIVE])
+        .toArray();
+      const maxOrder = rows.reduce((m, r) => Math.max(m, r.order), -1);
       const row = newRow<Action>({ ...data, order: maxOrder + 1 });
       await db.actions.put(row);
       return row;
@@ -171,11 +175,11 @@ export const Actions = {
     rows: Omit<Action, "id" | "updatedAt" | "deletedAt" | "order" | "handId">[]
   ): Promise<Action[]> =>
     db.transaction("rw", db.actions, async () => {
-      const existing = await db.actions.where("handId").equals(handId).toArray();
-      let next =
-        existing
-          .filter((r) => r.deletedAt === null)
-          .reduce((m, r) => Math.max(m, r.order), -1) + 1;
+      const existing = await db.actions
+        .where("[handId+deletedAt]")
+        .equals([handId, ALIVE])
+        .toArray();
+      let next = existing.reduce((m, r) => Math.max(m, r.order), -1) + 1;
       const built = rows.map((r) =>
         newRow<Action>({ ...r, handId, order: next++ })
       );
@@ -184,10 +188,11 @@ export const Actions = {
     }),
   remove: (id: string) => softDelete<Action>(db.actions, id),
   forHand: async (handId: string): Promise<Action[]> => {
-    const rows = await db.actions.where("handId").equals(handId).toArray();
-    return rows
-      .filter((r) => r.deletedAt === null)
-      .sort((a, b) => a.order - b.order);
+    const rows = await db.actions
+      .where("[handId+deletedAt]")
+      .equals([handId, ALIVE])
+      .toArray();
+    return rows.sort((a, b) => a.order - b.order);
   },
   /** delete the last (highest-order) action of a hand — used by UNDO */
   popLast: async (handId: string): Promise<Action | null> => {
@@ -203,10 +208,11 @@ export const Events = {
   create: (data: Omit<HandEvent, "id" | "updatedAt" | "deletedAt">) =>
     createRow<HandEvent>(db.events, data),
   forHand: async (handId: string): Promise<HandEvent[]> => {
-    const rows = await db.events.where("handId").equals(handId).toArray();
-    return rows
-      .filter((r) => r.deletedAt === null)
-      .sort((a, b) => a.updatedAt - b.updatedAt);
+    const rows = await db.events
+      .where("[handId+deletedAt]")
+      .equals([handId, ALIVE])
+      .toArray();
+    return rows.sort((a, b) => a.updatedAt - b.updatedAt);
   },
   remove: (id: string) => softDelete<HandEvent>(db.events, id),
 };
@@ -222,8 +228,11 @@ export const Bankroll = {
     return all.sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0));
   },
   forSession: async (sessionId: string): Promise<BankrollEntry | undefined> => {
-    const all = await listAlive<BankrollEntry>(db.bankroll);
-    return all.find((b) => b.sessionId === sessionId);
+    const rows = await db.bankroll
+      .where("[sessionId+deletedAt]")
+      .equals([sessionId, ALIVE])
+      .toArray();
+    return rows[0];
   },
 };
 
@@ -284,7 +293,7 @@ export const Settings = {
     return {
       id: SETTINGS_ID,
       updatedAt: 0,
-      deletedAt: null,
+      deletedAt: ALIVE,
       baseCurrency: "JPY",
       heroDefaultName: "Hero",
       extraCurrencies: [],
@@ -302,7 +311,7 @@ export const Settings = {
       : {
           id: SETTINGS_ID,
           updatedAt: 0,
-          deletedAt: null,
+          deletedAt: ALIVE,
           baseCurrency: "JPY",
           heroDefaultName: "Hero",
           extraCurrencies: [],

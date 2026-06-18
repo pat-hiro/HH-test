@@ -28,7 +28,7 @@ function WithTabBar({ children }: { children: React.ReactNode }) {
   const latest = useLiveQuery(async () => {
     if (fromUrl) return null;
     const all = await db.sessions.toArray();
-    const alive = all.filter((s) => s.deletedAt === null);
+    const alive = all.filter((s) => s.deletedAt === 0);
     return alive.sort((a, b) => b.startedAt - a.startedAt)[0]?.id ?? null;
   }, [fromUrl]);
   const sessionId = fromUrl ?? latest ?? null;

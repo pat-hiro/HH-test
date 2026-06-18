@@ -22,7 +22,7 @@ export default function Entry() {
 
   useEffect(() => {
     if (sessions === undefined) return;
-    const alive = sessions.filter((s) => s.deletedAt === null);
+    const alive = sessions.filter((s) => s.deletedAt === 0);
     const latest = alive.sort((a, b) => b.startedAt - a.startedAt)[0];
 
     if (latest) {

@@ -28,10 +28,10 @@ export default function Review() {
   if (!sessions || !allHands) return null;
 
   const sessionsAlive = sessions
-    .filter((s) => s.deletedAt === null)
+    .filter((s) => s.deletedAt === 0)
     .sort((a, b) => b.startedAt - a.startedAt);
 
-  const handsAlive = allHands.filter((h) => h.deletedAt === null);
+  const handsAlive = allHands.filter((h) => h.deletedAt === 0);
 
   const filtered = handsAlive
     .filter((h) => filterSession === "all" || h.sessionId === filterSession)

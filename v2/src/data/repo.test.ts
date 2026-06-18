@@ -36,7 +36,7 @@ beforeEach(async () => {
 });
 
 describe("sync invariants", () => {
-  it("create assigns a uuid, sets updatedAt, leaves deletedAt null", async () => {
+  it("create assigns a uuid, sets updatedAt, marks the row alive (deletedAt=0)", async () => {
     const s = await Sessions.create({
       date: "2026-06-17",
       startedAt: 100,
@@ -66,7 +66,10 @@ describe("sync invariants", () => {
     });
     expect(s.id).toMatch(/^[0-9a-f-]{36}$/i);
     expect(s.updatedAt).toBeGreaterThan(0);
-    expect(s.deletedAt).toBeNull();
+    // 0 is the alive sentinel — see Syncable / db.ts. Required because Dexie
+    // can't index `null` keys, so the v1 schema's null-deletedAt left every
+    // read scanning the whole table.
+    expect(s.deletedAt).toBe(0);
   });
 
   it("update refreshes updatedAt monotonically", async () => {
@@ -83,9 +86,25 @@ describe("sync invariants", () => {
     await Sessions.remove(s.id);
     const stillThere = await Sessions.get(s.id);
     expect(stillThere).not.toBeUndefined();
-    expect(stillThere!.deletedAt).not.toBeNull();
+    // Tombstone is the deletion epoch-ms, not just "non-zero" by accident.
+    expect(stillThere!.deletedAt).toBeGreaterThan(0);
     const visible = await Sessions.list();
     expect(visible.find((x) => x.id === s.id)).toBeUndefined();
+  });
+
+  it("alive-row reads use the deletedAt=0 index, not a JS filter (tombstones excluded)", async () => {
+    // Three sessions: one alive, two tombstoned. list() must see only the alive
+    // one, and the index seek under the hood returns it directly.
+    const live = await Sessions.create(seed());
+    const dead1 = await Sessions.create(seed());
+    const dead2 = await Sessions.create(seed());
+    await Sessions.remove(dead1.id);
+    await Sessions.remove(dead2.id);
+    const visible = await Sessions.list();
+    expect(visible.map((s) => s.id)).toEqual([live.id]);
+    // Tombstones still in the table but not counted as alive.
+    const { db } = await import("./db");
+    expect(await db.sessions.count()).toBe(3);
   });
 });
 
@@ -328,6 +347,68 @@ describe("bankroll + settings", () => {
     expect(updated.baseCurrency).toBe("USD");
     const stored = await db.settings.get("singleton");
     expect(stored?.baseCurrency).toBe("USD");
+  });
+});
+
+describe("v1 → v2 migration: null deletedAt is rewritten to 0", () => {
+  it("pre-existing rows saved with null deletedAt become 0 after open", async () => {
+    // Use a private DB name so this test can't collide with the singleton's
+    // state and so the upgrade hook genuinely runs against a v1 → v2 path.
+    const Dexie = (await import("dexie")).default;
+    const name = "hh_v2_migration_test_" + Date.now();
+    try {
+      await Dexie.delete(name);
+    } catch {
+      /* nothing there yet */
+    }
+
+    // 1) Open the SAME DB name at v1 (the previous schema) and write rows
+    //    with deletedAt: null — what an existing user's IndexedDB looks like
+    //    before upgrading to v2.
+    const v1 = new Dexie(name);
+    v1.version(1).stores({
+      sessions: "id, startedAt, deletedAt",
+      sessionPlayers: "id, sessionId, [sessionId+seat], deletedAt",
+      hands: "id, sessionId, [sessionId+handNo], startedAt, deletedAt",
+      actions: "id, handId, [handId+order], deletedAt",
+      events: "id, handId, deletedAt",
+      bankroll: "id, startAt, sessionId, deletedAt",
+      settings: "id",
+    });
+    await v1.open();
+    await v1.table("sessions").put({
+      id: "legacy-alive",
+      updatedAt: 100,
+      deletedAt: null,
+      ...seed(),
+    });
+    await v1.table("sessions").put({
+      id: "legacy-tombstoned",
+      updatedAt: 100,
+      deletedAt: 500, // already a real tombstone — must NOT be touched
+      ...seed(),
+    });
+    v1.close();
+
+    // 2) Open the SAME name through V2Database — the open path sees v=1 on
+    //    disk vs v=2 in code and runs our upgrade hook.
+    const v2 = new V2Database(name);
+    await v2.open();
+    const alive = await v2.sessions.get("legacy-alive");
+    const dead = await v2.sessions.get("legacy-tombstoned");
+    expect(alive?.deletedAt).toBe(0); // null → 0
+    expect(dead?.deletedAt).toBe(500); // tombstone preserved
+
+    // 3) Verify the index-seek path finds the upgraded row.
+    const visible = await v2.sessions
+      .where("deletedAt")
+      .equals(0)
+      .toArray();
+    expect(visible.map((s) => s.id)).toContain("legacy-alive");
+    expect(visible.map((s) => s.id)).not.toContain("legacy-tombstoned");
+
+    v2.close();
+    await Dexie.delete(name);
   });
 });
 

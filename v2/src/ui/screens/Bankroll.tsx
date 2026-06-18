@@ -87,7 +87,7 @@ export default function Bankroll() {
 
   if (!entries || !settings || !sessions) return null;
 
-  const sessionsAlive = sessions.filter((s) => s.deletedAt === null);
+  const sessionsAlive = sessions.filter((s) => s.deletedAt === 0);
 
   return (
     <div className="min-h-screen flex flex-col">

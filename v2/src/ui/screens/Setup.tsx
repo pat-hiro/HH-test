@@ -40,7 +40,7 @@ export default function Setup() {
             .equals(sessionId)
             .toArray()
             .then((rs) =>
-              rs.filter((r) => r.deletedAt === null).sort((a, b) => a.seat - b.seat)
+              rs.filter((r) => r.deletedAt === 0).sort((a, b) => a.seat - b.seat)
             )
         : [],
     [sessionId]
@@ -56,7 +56,7 @@ export default function Setup() {
       db.sessionPlayers.toArray().then((ps) => {
         const counts = new Map<string, number>();
         for (const p of ps) {
-          if (p.deletedAt !== null) continue;
+          if (p.deletedAt !== 0) continue;
           const n = p.name.trim();
           if (!n) continue;
           counts.set(n, (counts.get(n) ?? 0) + 1);
@@ -101,7 +101,7 @@ export default function Setup() {
             .where("sessionId")
             .equals(sessionId)
             .toArray()
-            .then((hs) => hs.filter((h) => h.deletedAt === null))
+            .then((hs) => hs.filter((h) => h.deletedAt === 0))
         : [],
     [sessionId]
   );

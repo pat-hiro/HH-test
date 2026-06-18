@@ -43,12 +43,12 @@ export async function exportSessionJSON(sessionId: string): Promise<void> {
   const handIds = hands.map((h) => h.id);
   const actions = handIds.length
     ? (await db.actions.where("handId").anyOf(handIds).toArray()).filter(
-        (a) => a.deletedAt === null
+        (a) => a.deletedAt === 0
       )
     : [];
   const events = handIds.length
     ? (await db.events.where("handId").anyOf(handIds).toArray()).filter(
-        (e) => e.deletedAt === null
+        (e) => e.deletedAt === 0
       )
     : [];
   const payload = { session, players, hands, actions, events };

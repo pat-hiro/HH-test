@@ -45,7 +45,7 @@ function useEngineState(handId: string | undefined) {
             .toArray()
             .then((rs) =>
               rs
-                .filter((r) => r.deletedAt === null)
+                .filter((r) => r.deletedAt === 0)
                 .sort((a, b) => a.order - b.order)
             )
         : [],
@@ -1376,7 +1376,7 @@ export default function Hand() {
           stack: null as number | null,
           note: "",
           updatedAt: 0,
-          deletedAt: null,
+          deletedAt: 0,
         };
         return (
           <PlayerEditSheet
