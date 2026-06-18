@@ -30,23 +30,23 @@ export function positionLabels(
 
 /**
  * Push seats away from the right and left horizontal midlines so adjacent
- * seats on the curved ends have more vertical breathing room. Even-angle
- * distribution puts pairs like S2&S3 (right midline) and S7&S8 (left midline)
- * too close together on landscape ovals — especially at 9+ handed. This is
- * the angular offset added on top of the even spacing; α grows with seat
- * count because the cramping is worse at higher N.
+ * seats on the curved ends have more vertical breathing room. The offset
+ * uses sin(2θ) — which gives the right "split apart" direction near θ=0 and
+ * θ=180 — multiplied by cos²(θ). The cos² factor zeroes out the offset at
+ * the top and bottom of the oval (where the seats need horizontal room, not
+ * vertical), so the spread doesn't crowd seats around the bottom curve when
+ * total ≥ 10 puts several seats there.
+ *
+ * Without the cos² damping, sin(2θ) was pulling bottom-curve seats TOWARD
+ * the bottom-centre — the 10-handed S5&S6 and 11-handed S5&S6&S7 crowding
+ * the user reported.
  */
 function landscapeSpread(angleDeg: number, total: number): number {
   if (total <= 6) return angleDeg;
-  // α grows with seat count (worst case is ≥3 seats around each midline at
-  // 10-11 handed). We don't go above 0.25 — beyond that the corner seats get
-  // pushed too close to the dealer.
-  const alpha = total <= 8 ? 0.15 : total === 9 ? 0.2 : 0.25;
+  const alpha = total <= 8 ? 0.15 : 0.2;
   const r = (angleDeg * Math.PI) / 180;
-  // sin(2θ) is zero at the four extrema (top / right / bottom / left) and
-  // peaks at the four diagonals, so the offset pushes upper-right seats up
-  // and lower-right seats down — exactly the spread we want.
-  return angleDeg + alpha * Math.sin(2 * r) * (180 / Math.PI);
+  const damp = Math.cos(r) * Math.cos(r); // 1 at horizontal midlines, 0 at top/bottom
+  return angleDeg + alpha * damp * Math.sin(2 * r) * (180 / Math.PI);
 }
 
 /**
@@ -83,9 +83,11 @@ export function seatXY(
   let angleDeg = seat * (360 / slots) - 90 + rotDeg;
   if (!opts.portrait) angleDeg = landscapeSpread(angleDeg, total);
   const angle = (angleDeg * Math.PI) / 180;
-  // Landscape: wider X, flatter Y — reads like a cardroom table.
+  // Landscape: wider X, flatter Y — reads like a cardroom table. rx pulled in
+  // a touch from 44 → 42 so the right-edge seat (at the right midline) doesn't
+  // get its icon clipped off-screen on narrow phones.
   // Portrait: taller Y, narrower X — vertical oval that fills a phone screen.
-  const rx = opts.portrait ? 38 : 44;
+  const rx = opts.portrait ? 38 : 42;
   const ry = opts.portrait ? 44 : 37;
   return {
     x: 50 + rx * Math.cos(angle),
