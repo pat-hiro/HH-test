@@ -1,4 +1,4 @@
-import { suitColor, suitSymbol } from "../cards";
+import { UNKNOWN_CARD, suitColor, suitSymbol } from "../cards";
 
 export default function PlayingCard({
   card,
@@ -31,6 +31,15 @@ export default function PlayingCard({
   if (!card) {
     return (
       <div className={`${sz} ${ring} ${opacity} rounded bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-600`}>
+        ?
+      </div>
+    );
+  }
+  // A deliberately-unknown card: a filled "?" face so it reads as "recorded but
+  // unknown", visually distinct from the dim empty-slot placeholder above.
+  if (card === UNKNOWN_CARD) {
+    return (
+      <div className={`${sz} ${ring} ${opacity} rounded bg-neutral-500 border border-neutral-400 flex items-center justify-center font-bold text-white`}>
         ?
       </div>
     );

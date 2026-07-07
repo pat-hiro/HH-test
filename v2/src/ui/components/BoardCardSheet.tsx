@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RANKS, SUITS, suitSymbol } from "../cards";
+import { RANKS, SUITS, UNKNOWN_CARD, isRealCard, suitSymbol } from "../cards";
 import PlayingCard from "./PlayingCard";
 
 /**
@@ -45,7 +45,8 @@ export default function BoardCardSheet({
   const [active, setActive] = useState(startSlot);
 
   const used = new Set<string>(exclude);
-  for (const c of slots) if (c) used.add(c);
+  // UNKNOWN_CARD slots don't consume a real card, so they never block a rank.
+  for (const c of slots) if (isRealCard(c)) used.add(c);
   if (hero) {
     used.add(hero[0]);
     used.add(hero[1]);
@@ -69,6 +70,25 @@ export default function BoardCardSheet({
     const next = [...slots];
     next[active] = null;
     setSlots(next);
+  };
+
+  /** Mark the active slot as deliberately unknown (a "?" placeholder), then
+   *  advance to the next still-empty slot — so a user who can't recall a card
+   *  can still record that one was dealt and move on. */
+  const markActiveUnknown = () => {
+    const next = [...slots];
+    next[active] = UNKNOWN_CARD;
+    setSlots(next);
+    const nxt = next.findIndex((c, i) => i > active && c === null);
+    if (nxt !== -1) setActive(nxt);
+  };
+
+  /** Fill every still-empty slot with UNKNOWN_CARD and submit — the "I don't
+   *  remember the rest of the board, just let me record the result" escape
+   *  hatch for a multiway all-in run-out. Slots already holding a real card
+   *  (or an explicit unknown) are left untouched. */
+  const confirmRestUnknown = () => {
+    onSubmit(slots.map((c) => (c === null ? UNKNOWN_CARD : c)));
   };
 
   /** Confirm before wiping the entire board (flop+turn+river) since the
@@ -148,6 +168,13 @@ export default function BoardCardSheet({
               ⟲
             </button>
             <button
+              onClick={markActiveUnknown}
+              title="現在のスロットを不明にする"
+              className="w-11 h-9 bg-neutral-700 rounded flex items-center justify-center text-base font-bold"
+            >
+              ?
+            </button>
+            <button
               onClick={() => onSubmit(slots)}
               className="w-11 h-9 bg-emerald-600 rounded text-xs font-bold"
             >
@@ -191,8 +218,16 @@ export default function BoardCardSheet({
             </div>
           ))}
         </div>
-        <div className="px-3 pb-2 text-[10px] text-neutral-500">
-          覚えていない箇所は空欄のままで OK。あとから卓上のカードをタップして埋められます。
+        <div className="px-3 pb-2 pt-1 space-y-1.5">
+          <button
+            onClick={confirmRestUnknown}
+            className="w-full py-2 bg-neutral-700 rounded text-xs font-bold text-neutral-100"
+          >
+            残りを不明（?）で確定
+          </button>
+          <div className="text-[10px] text-neutral-500">
+            覚えていない箇所は空欄のままで OK。「?」で確定すれば結果入力へ進めます。あとから卓上のカードをタップして埋められます。
+          </div>
         </div>
       </div>
     </div>

@@ -9,6 +9,7 @@ import type { Hand } from "../../data/types";
 import { exportSessionCSV, exportSessionJSON } from "../export";
 import PlayingCard from "../components/PlayingCard";
 import { positionLabels } from "../positions";
+import { isRealCard } from "../cards";
 
 /**
  * Review — hand-history list with quick filters and a richer drill-in.
@@ -331,6 +332,15 @@ function HandDetail({ hand }: { hand: Hand }) {
         </div>
       )}
 
+      {/* rake (optional) — net stays won − spent; rake is shown for context,
+          since winners already sum to pot − rake. */}
+      {hand.rake > 0 && (
+        <div className="flex justify-between text-[11px] text-neutral-400 px-1">
+          <span>レーキ</span>
+          <span className="text-neutral-300">{hand.rake}</span>
+        </div>
+      )}
+
       {/* action log */}
       <div>
         <div className="text-[10px] text-neutral-400 mb-1">Action log</div>
@@ -395,11 +405,12 @@ function gtoWizardLink(hand: Hand): string {
   const parts: string[] = [`${hand.sb}/${hand.bb}`];
   if (hand.heroCards) parts.push(hand.heroCards.join(""));
   if (hand.board.flop) {
-    const filled = hand.board.flop.filter((c): c is string => !!c);
+    // Only real cards go into the search — an UNKNOWN_CARD ("?") isn't a spot.
+    const filled = hand.board.flop.filter(isRealCard);
     if (filled.length > 0) parts.push(filled.join(""));
   }
-  if (hand.board.turn) parts.push(hand.board.turn);
-  if (hand.board.river) parts.push(hand.board.river);
+  if (isRealCard(hand.board.turn)) parts.push(hand.board.turn);
+  if (isRealCard(hand.board.river)) parts.push(hand.board.river);
   const q = encodeURIComponent(parts.join(" "));
   return `https://app.gtowizard.com/?q=${q}`;
 }

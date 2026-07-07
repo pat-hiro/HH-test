@@ -90,8 +90,31 @@ export function BlindsSheet({
 }) {
   const [draftSb, setDraftSb] = useState(String(sb));
   const [draftBb, setDraftBb] = useState(String(bb));
+  const [error, setError] = useState<string | null>(null);
   const sbPresets = [1, 2, 5, 10, 25, 50];
   const bbPresets = [2, 3, 4, 5, 10, 25];
+
+  // Guard the stakes at input time so a bb=0 / sb>bb config can't be saved —
+  // those break min-raise and every BB-basis preset downstream. sb=0 is left
+  // allowed (straddle-only / special tables); only sb<=bb is enforced. Existing
+  // saved sessions are untouched: this validates the new draft only.
+  const trySave = () => {
+    const sbN = parseFloat(draftSb) || 0;
+    const bbN = parseFloat(draftBb) || 0;
+    if (!(bbN > 0)) {
+      setError("BB は 0 より大きい必要があります");
+      return;
+    }
+    if (sbN < 0) {
+      setError("SB は 0 以上にしてください");
+      return;
+    }
+    if (sbN > bbN) {
+      setError("SB は BB 以下にしてください");
+      return;
+    }
+    onSave(sbN, bbN);
+  };
 
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-end" onClick={onCancel}>
@@ -146,12 +169,17 @@ export function BlindsSheet({
             </div>
           </div>
         </div>
+        {error && (
+          <div className="mt-3 text-xs text-rose-300 bg-rose-950/40 border border-rose-800 rounded px-2 py-1.5">
+            {error}
+          </div>
+        )}
         <div className="flex gap-2 mt-4">
           <button onClick={onCancel} className="flex-1 py-3 bg-neutral-800 rounded">
             Cancel
           </button>
           <button
-            onClick={() => onSave(parseFloat(draftSb) || 0, parseFloat(draftBb) || 0)}
+            onClick={trySave}
             className="flex-1 py-3 bg-blue-500 rounded font-bold"
           >
             Confirm

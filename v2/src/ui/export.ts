@@ -68,8 +68,11 @@ export async function exportSessionCSV(sessionId: string): Promise<void> {
     bb: h.bb,
     ante: h.ante,
     auto_straddle: h.autoStraddle ? 1 : 0,
+    // A null slot is "not entered" → blank; UNKNOWN_CARD is stored as "?" and
+    // survives as "?" so it stays distinguishable from both blanks and real
+    // cards. turn/river below follow the same null→"" convention.
     board_flop:
-      h.board.flop?.map((c) => c ?? "?").join(" ") ?? "",
+      h.board.flop?.map((c) => c ?? "").join(" ") ?? "",
     board_turn: h.board.turn ?? "",
     board_river: h.board.river ?? "",
     pot: h.pot,

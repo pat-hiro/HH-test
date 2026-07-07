@@ -22,6 +22,8 @@ import { PlayerEditSheet } from "../components/SetupSheets";
 import { positionLabels } from "../positions";
 import { fmtChips } from "../fmt";
 import { splitEvenly as splitPot } from "../split";
+import { suggestedRake } from "../rake";
+import { isRealCard } from "../cards";
 
 // ----- helpers --------------------------------------------------------------
 
@@ -179,6 +181,10 @@ export default function HandDrag() {
   const [showdown, setShowdown] = useState(false);
   const [shares, setShares] = useState<Record<number, string>>({});
   const [knownCards, setKnownCards] = useState<Record<number, [string, string]>>({});
+  // Optional rake for this hand, as an editable string ("" = 0). Seeded once
+  // when the result panel opens (from a saved rake on re-open, else the session
+  // rake-config suggestion) but always user-overridable.
+  const [rake, setRake] = useState<string>("");
 
   // Board / completion logic. Three situations:
   //  - handFoldedOut: only one player left → result, no board needed.
@@ -236,7 +242,7 @@ export default function HandDrag() {
   // hand is finalized — so villain cards / shares typed before finalizing
   // survive a reload or backgrounding (they are autosaved below).
   useEffect(() => {
-    if (!hand || !state) return;
+    if (!hand || !state || !session) return;
     if (!showResult) {
       setResultSeeded(false);
       return;
@@ -245,6 +251,14 @@ export default function HandDrag() {
     setResultSeeded(true);
     const survivors = state.inHand;
     const r = hand.result;
+    // Seed the rake input: a saved rake wins (re-open), else the session's
+    // rake-config suggestion. Either way it's just a prefill the user can edit.
+    const seededRake =
+      hand.rake > 0 ? hand.rake : suggestedRake(state.pot, session.rake);
+    setRake(seededRake > 0 ? String(seededRake) : "");
+    // Winners must total pot − rake, so seed the single-survivor default (and
+    // every "assign all / split" helper below) off the post-rake distributable.
+    const distributable = state.pot - seededRake;
     const hasDraft = r.winners.length > 0 || r.knownCards.length > 0;
     if (hasDraft) {
       const m: Record<number, string> = {};
@@ -255,11 +269,11 @@ export default function HandDrag() {
       for (const k of r.knownCards) kc[k.seat] = k.cards;
       setKnownCards(kc);
     } else {
-      setShares(survivors.length === 1 ? { [survivors[0]]: String(state.pot) } : {});
+      setShares(survivors.length === 1 ? { [survivors[0]]: String(distributable) } : {});
       setShowdown(survivors.length > 1);
       setKnownCards({});
     }
-  }, [hand, state, showResult, resultSeeded]);
+  }, [hand, state, session, showResult, resultSeeded]);
 
   // Autosave the in-progress result (shares / showdown / known cards) onto the
   // hand so nothing is lost if the app reloads before the user taps Next Hand.
@@ -755,11 +769,15 @@ export default function HandDrag() {
   // ----- result entry (shown when the hand is complete) --------------------
 
   const survivors = state.inHand;
+  const rakeNum = parseFloat(rake) || 0;
+  // The chips available to distribute after rake. Winners should total this;
+  // with rake=0 it collapses to the whole pot (unchanged behaviour).
+  const distributablePot = state.pot - rakeNum;
   const sharesTotal = Object.values(shares).reduce(
     (s, v) => s + (parseFloat(v) || 0),
     0
   );
-  const sharesRemainder = state.pot - sharesTotal;
+  const sharesRemainder = distributablePot - sharesTotal;
 
   /** auto-assign a single side pot to one winner (overwrites that seat's
    *  current share by adding the pot's amount; existing shares for other
@@ -775,7 +793,7 @@ export default function HandDrag() {
   const setShare = (seat: number, v: string) =>
     setShares((prev) => ({ ...prev, [seat]: v }));
   const assignAllTo = (seat: number) =>
-    setShares({ [seat]: String(state.pot) });
+    setShares({ [seat]: String(distributablePot) });
   /** Split each SIDE POT evenly among that pot's eligible survivors. With no
    *  side pots (or a single-tier main pot) this collapses to the obvious
    *  "split the whole pot" behaviour, but when a short stack is all-in it
@@ -785,9 +803,13 @@ export default function HandDrag() {
     const survSet = new Set(survivors);
     const m: Record<number, number> = {};
     for (const s of survivors) m[s] = 0;
-    const pots = state.sidePots.length > 0
+    const basePots = state.sidePots.length > 0
       ? state.sidePots
       : [{ amount: state.pot, eligible: survivors }];
+    // Take rake off the top (the main pot) so the split totals pot − rake.
+    const pots = basePots.map((p, i) =>
+      i === 0 ? { ...p, amount: Math.max(0, p.amount - rakeNum) } : p
+    );
     for (const pot of pots) {
       const winners = pot.eligible.filter((s) => survSet.has(s));
       if (winners.length === 0) continue;
@@ -869,7 +891,7 @@ export default function HandDrag() {
       .map(([seat, v]) => ({ seat: Number(seat), amount: parseFloat(v) || 0 }))
       .filter((w) => w.amount > 0);
     if (ws.length === 0 && survivors.length === 1) {
-      return [{ seat: survivors[0], amount: state.pot }];
+      return [{ seat: survivors[0], amount: distributablePot }];
     }
     return ws;
   };
@@ -881,16 +903,17 @@ export default function HandDrag() {
   const finalizeCurrentHand = async (): Promise<boolean> => {
     const winners = buildWinners();
     const winTotal = winners.reduce((s, w) => s + w.amount, 0);
-    // Never persist a hand whose recorded pay-outs don't match the pot — that
-    // miscount silently corrupts every downstream stack delta. Warn-confirm
-    // instead of failing silently so the user can still proceed (e.g. when
-    // they intentionally don't know who won a side pot).
-    if (winTotal !== state.pot) {
-      const diff = state.pot - winTotal;
+    // Distribution + rake must equal the pot. Never persist a hand whose
+    // recorded pay-outs don't reconcile — that miscount silently corrupts every
+    // downstream stack delta. Warn-confirm instead of failing silently so the
+    // user can still proceed (e.g. when they intentionally don't know who won a
+    // side pot). With rake=0 this is the original winTotal===pot guard.
+    if (winTotal + rakeNum !== state.pot) {
+      const diff = state.pot - winTotal - rakeNum;
       const sign = diff > 0 ? "+" : "";
       if (
         !confirm(
-          `配分の合計がポットと一致しません（差: ${sign}${diff}）。このまま確定しますか？`
+          `配分＋レーキの合計がポットと一致しません（差: ${sign}${diff}）。このまま確定しますか？`
         )
       )
         return false;
@@ -903,6 +926,7 @@ export default function HandDrag() {
       finalized: true,
       endedAt: Date.now(),
       pot: state.pot,
+      rake: rakeNum,
       result: {
         winners,
         wentToShowdown: showdown,
@@ -1293,6 +1317,21 @@ export default function HandDrag() {
                 </div>
               </div>
 
+              <div className="flex items-center gap-2 pt-1">
+                <label className="text-xs text-neutral-400 whitespace-nowrap">
+                  レーキ（任意）
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  onFocus={(e) => e.currentTarget.select()}
+                  value={rake}
+                  onChange={(e) => setRake(e.target.value)}
+                  placeholder="0"
+                  className="flex-1"
+                />
+              </div>
+
               {showdown && (
                 <div className="pt-2 border-t border-neutral-800">
                   <div className="text-xs font-semibold text-neutral-200 mb-1">
@@ -1471,7 +1510,7 @@ export default function HandDrag() {
           initialBoard={board}
           startSlot={boardSheetSlot}
           hero={hand.heroCards}
-          exclude={board.filter((c): c is string => !!c)}
+          exclude={board.filter(isRealCard)}
           onSubmit={submitBoard}
           onCancel={() => setBoardSheetSlot(null)}
           onClear={clearBoard}
@@ -1501,7 +1540,7 @@ export default function HandDrag() {
           count={2}
           initial={hand.heroCards ?? [null, null]}
           exclude={[
-            ...board.filter((c): c is string => !!c),
+            ...board.filter(isRealCard),
             ...Object.values(knownCards).flat(),
           ]}
           onSubmit={saveHeroCards}
@@ -1515,7 +1554,7 @@ export default function HandDrag() {
           count={2}
           initial={knownCards[knownCardsSeat] ?? [null, null]}
           exclude={[
-            ...board.filter((c): c is string => !!c),
+            ...board.filter(isRealCard),
             ...(hand.heroCards ?? []),
             ...Object.entries(knownCards)
               .filter(([s]) => Number(s) !== knownCardsSeat)
