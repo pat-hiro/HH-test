@@ -108,6 +108,37 @@ describe("sync invariants", () => {
   });
 });
 
+describe("concurrent writes: update/softDelete are atomic read-modify-writes", () => {
+  it("two parallel updates patching different fields both survive", async () => {
+    const s = await Sessions.create(seed());
+    // Fire both WITHOUT awaiting between them — the way the result autosave
+    // and a note save can overlap. Pre-fix, both read the same base row and
+    // the later put dropped the earlier field.
+    await Promise.all([
+      Sessions.update(s.id, { casino: "Aria" }),
+      Sessions.update(s.id, { note: "deep game" }),
+    ]);
+    const final = await Sessions.get(s.id);
+    expect(final?.casino).toBe("Aria");
+    expect(final?.note).toBe("deep game");
+  });
+
+  it("an update racing a softDelete cannot resurrect the tombstone", async () => {
+    const s = await Sessions.create(seed());
+    await Promise.all([
+      Sessions.remove(s.id),
+      Sessions.update(s.id, { casino: "Aria" }),
+    ]);
+    // Whichever order the two commits land in, the row stays dead: delete-
+    // last tombstones the updated row; update-last merges onto the tombstoned
+    // row and its patch never touches deletedAt.
+    const final = await Sessions.get(s.id);
+    expect(final?.deletedAt).toBeGreaterThan(0);
+    const visible = await Sessions.list();
+    expect(visible.find((x) => x.id === s.id)).toBeUndefined();
+  });
+});
+
 describe("session + players + hands wiring", () => {
   it("creates a session with roster and a hand snapshot", async () => {
     const s = await Sessions.create(seed());

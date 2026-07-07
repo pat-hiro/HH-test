@@ -140,8 +140,22 @@ export default function Hand() {
   // straight from the DB, recomputes engine state, and appends atomically.
   const writeLock = useRef<Promise<unknown>>(Promise.resolve());
 
-  // result-entry state, seeded once when the hand becomes complete
-  const resultSeededRef = useRef(false);
+  // One-shot guard for Next Hand: a second tap while the first run is still
+  // writing must be DROPPED, not queued behind it — a rerun would finalize
+  // twice, double-apply the stack deltas, and mint a second hand with the
+  // same handNo. The ref gives a synchronous re-entry check (state updates
+  // land too late for a double tap); the state disables the button. Held
+  // until nav() fires — the finally runs right after it.
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+
+  // result-entry state, seeded once when the hand becomes complete.
+  // `resultSeeded` is STATE, not a ref, on purpose: the autosave below must
+  // not run until the seeded values have actually landed in shares/knownCards.
+  // A synchronously-flipped ref let the same flush autosave the still-empty
+  // shares over a saved draft — fatal if the app died before the follow-up
+  // write. As state, it only turns true in the same render as the seed.
+  const [resultSeeded, setResultSeeded] = useState(false);
   const [showdown, setShowdown] = useState(false);
   const [shares, setShares] = useState<Record<number, string>>({});
   const [knownCards, setKnownCards] = useState<Record<number, [string, string]>>({});
@@ -204,11 +218,11 @@ export default function Hand() {
   useEffect(() => {
     if (!hand || !state) return;
     if (!showResult) {
-      resultSeededRef.current = false;
+      setResultSeeded(false);
       return;
     }
-    if (resultSeededRef.current) return;
-    resultSeededRef.current = true;
+    if (resultSeeded) return;
+    setResultSeeded(true);
     const survivors = state.inHand;
     const r = hand.result;
     const hasDraft = r.winners.length > 0 || r.knownCards.length > 0;
@@ -225,7 +239,7 @@ export default function Hand() {
       setShowdown(survivors.length > 1);
       setKnownCards({});
     }
-  }, [hand, state, showResult]);
+  }, [hand, state, showResult, resultSeeded]);
 
   // Autosave the in-progress result (shares / showdown / known cards) onto the
   // hand so nothing is lost if the app reloads before the user taps Next Hand.
@@ -233,7 +247,7 @@ export default function Hand() {
   // liveQuery update.
   useEffect(() => {
     if (!hand || !showResult || hand.finalized) return;
-    if (!resultSeededRef.current) return;
+    if (!resultSeeded) return;
     const winners = Object.entries(shares)
       .map(([seat, v]) => ({ seat: Number(seat), amount: parseFloat(v) || 0 }))
       .filter((w) => w.amount > 0);
@@ -244,7 +258,7 @@ export default function Hand() {
     const next = { winners, wentToShowdown: showdown, knownCards: knownArr };
     if (JSON.stringify(next) === JSON.stringify(hand.result)) return;
     void Hands.update(hand.id, { result: next });
-  }, [shares, showdown, knownCards, showResult, hand]);
+  }, [shares, showdown, knownCards, showResult, hand, resultSeeded]);
 
   if (!session || !hand || !setup || !state || !settings) {
     return (
@@ -791,109 +805,117 @@ export default function Hand() {
   };
 
   const nextHand = async () => {
-    const winners = buildWinners();
-    const winTotal = winners.reduce((s, w) => s + w.amount, 0);
-    // Never persist a hand whose recorded pay-outs don't match the pot — that
-    // miscount silently corrupts every downstream stack delta. Warn-confirm
-    // instead of failing silently so the user can still proceed (e.g. when
-    // they intentionally don't know who won a side pot).
-    if (winTotal !== state.pot) {
-      const diff = state.pot - winTotal;
-      const sign = diff > 0 ? "+" : "";
-      if (
-        !confirm(
-          `配分の合計がポットと一致しません（差: ${sign}${diff}）。このまま次のハンドへ進みますか？`
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const winners = buildWinners();
+      const winTotal = winners.reduce((s, w) => s + w.amount, 0);
+      // Never persist a hand whose recorded pay-outs don't match the pot — that
+      // miscount silently corrupts every downstream stack delta. Warn-confirm
+      // instead of failing silently so the user can still proceed (e.g. when
+      // they intentionally don't know who won a side pot).
+      if (winTotal !== state.pot) {
+        const diff = state.pot - winTotal;
+        const sign = diff > 0 ? "+" : "";
+        if (
+          !confirm(
+            `配分の合計がポットと一致しません（差: ${sign}${diff}）。このまま次のハンドへ進みますか？`
+          )
         )
-      )
-        return;
-    }
-    const knownArr = Object.entries(knownCards).map(([seat, cards]) => ({
-      seat: Number(seat),
-      cards,
-    }));
-    await Hands.update(hand.id, {
-      finalized: true,
-      endedAt: Date.now(),
-      pot: state.pot,
-      result: {
-        winners,
-        wentToShowdown: showdown,
-        knownCards: knownArr,
-      },
-    });
-
-    // rotate BTN to next active seat, update player stacks from the result
-    const next = nextActive(hand.buttonSeat, session.seatCount, activeSeats) ?? hand.buttonSeat;
-    const roster = await Players.forSession(session.id);
-    for (const p of roster) {
-      const snap = hand.seats.find((s) => s.seat === p.seat);
-      if (!snap) continue;
-      const won = winners.find((w) => w.seat === p.seat)?.amount ?? 0;
-      const delta = won - (state.spentTotal[p.seat] ?? 0);
-      const newStack = (p.stack ?? snap.startStack) + delta;
-      if (newStack !== p.stack) await Players.update(p.id, { stack: newStack });
-    }
-    await Sessions.update(session.id, { buttonSeat: next });
-
-    // create next hand snapshot — honour mid-session joiners: players posting
-    // are dealt in with a post chip; players who chose "wait for BB" are held
-    // out until the BB reaches their seat (resolveDealtSeats), then join.
-    const prev = await Hands.lastForSession(session.id);
-    const handNo = (prev?.handNo ?? hand.handNo) + 1;
-    const updatedRoster = await Players.forSession(session.id);
-    const { dealt, joining } = resolveDealtSeats(
-      updatedRoster,
-      next,
-      session.seatCount
-    );
-    const seatsSnap = updatedRoster
-      .filter((p) => dealt.includes(p.seat))
-      .map((p) => ({
-        seat: p.seat,
-        name: p.name,
-        startStack: p.stack ?? 0,
-        posted: p.mustPostBB
-          ? [
-              { kind: "post" as const, amount: hand.bb },
-              ...(p.postWithAnte && hand.ante > 0
-                ? [{ kind: "post_ante" as const, amount: hand.ante }]
-                : []),
-            ]
-          : [],
-      }));
-    const nh = await Hands.create({
-      sessionId: session.id,
-      handNo,
-      startedAt: Date.now(),
-      endedAt: null,
-      buttonSeat: next,
-      sb: hand.sb,
-      bb: hand.bb,
-      ante: hand.ante,
-      autoStraddle: hand.autoStraddle,
-      straddleAmount: hand.straddleAmount,
-      seats: seatsSnap,
-      board: { flop: null, turn: null, river: null },
-      heroCards: null,
-      result: { winners: [], wentToShowdown: false, knownCards: [] },
-      pot: 0,
-      rake: 0,
-      note: "",
-      tags: [],
-      finalized: false,
-    });
-    // Clear one-time flags now that the snapshot is taken: posts are consumed,
-    // and anyone who just joined off the BB-wait is now a regular player.
-    for (const p of updatedRoster) {
-      const patch: Partial<SessionPlayer> = {};
-      if (p.mustPostBB || p.postWithAnte) {
-        patch.mustPostBB = false;
-        patch.postWithAnte = false;
+          return;
       }
-      if (p.waitingForBB && joining.includes(p.seat)) patch.waitingForBB = false;
-      if (Object.keys(patch).length > 0) await Players.update(p.id, patch);
+      const knownArr = Object.entries(knownCards).map(([seat, cards]) => ({
+        seat: Number(seat),
+        cards,
+      }));
+      await Hands.update(hand.id, {
+        finalized: true,
+        endedAt: Date.now(),
+        pot: state.pot,
+        result: {
+          winners,
+          wentToShowdown: showdown,
+          knownCards: knownArr,
+        },
+      });
+
+      // rotate BTN to next active seat, update player stacks from the result
+      const next = nextActive(hand.buttonSeat, session.seatCount, activeSeats) ?? hand.buttonSeat;
+      const roster = await Players.forSession(session.id);
+      for (const p of roster) {
+        const snap = hand.seats.find((s) => s.seat === p.seat);
+        if (!snap) continue;
+        const won = winners.find((w) => w.seat === p.seat)?.amount ?? 0;
+        const delta = won - (state.spentTotal[p.seat] ?? 0);
+        const newStack = (p.stack ?? snap.startStack) + delta;
+        if (newStack !== p.stack) await Players.update(p.id, { stack: newStack });
+      }
+      await Sessions.update(session.id, { buttonSeat: next });
+
+      // create next hand snapshot — honour mid-session joiners: players posting
+      // are dealt in with a post chip; players who chose "wait for BB" are held
+      // out until the BB reaches their seat (resolveDealtSeats), then join.
+      const prev = await Hands.lastForSession(session.id);
+      const handNo = (prev?.handNo ?? hand.handNo) + 1;
+      const updatedRoster = await Players.forSession(session.id);
+      const { dealt, joining } = resolveDealtSeats(
+        updatedRoster,
+        next,
+        session.seatCount
+      );
+      const seatsSnap = updatedRoster
+        .filter((p) => dealt.includes(p.seat))
+        .map((p) => ({
+          seat: p.seat,
+          name: p.name,
+          startStack: p.stack ?? 0,
+          posted: p.mustPostBB
+            ? [
+                { kind: "post" as const, amount: hand.bb },
+                ...(p.postWithAnte && hand.ante > 0
+                  ? [{ kind: "post_ante" as const, amount: hand.ante }]
+                  : []),
+              ]
+            : [],
+        }));
+      const nh = await Hands.create({
+        sessionId: session.id,
+        handNo,
+        startedAt: Date.now(),
+        endedAt: null,
+        buttonSeat: next,
+        sb: hand.sb,
+        bb: hand.bb,
+        ante: hand.ante,
+        autoStraddle: hand.autoStraddle,
+        straddleAmount: hand.straddleAmount,
+        seats: seatsSnap,
+        board: { flop: null, turn: null, river: null },
+        heroCards: null,
+        result: { winners: [], wentToShowdown: false, knownCards: [] },
+        pot: 0,
+        rake: 0,
+        note: "",
+        tags: [],
+        finalized: false,
+      });
+      // Clear one-time flags now that the snapshot is taken: posts are consumed,
+      // and anyone who just joined off the BB-wait is now a regular player.
+      for (const p of updatedRoster) {
+        const patch: Partial<SessionPlayer> = {};
+        if (p.mustPostBB || p.postWithAnte) {
+          patch.mustPostBB = false;
+          patch.postWithAnte = false;
+        }
+        if (p.waitingForBB && joining.includes(p.seat)) patch.waitingForBB = false;
+        if (Object.keys(patch).length > 0) await Players.update(p.id, patch);
+      }
+      nav(`/sessions/${session.id}/hands/${nh.id}`);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
-    nav(`/sessions/${session.id}/hands/${nh.id}`);
   };
 
   // ----- render -------------------------------------------------------------
@@ -1192,7 +1214,8 @@ export default function Hand() {
 
             <button
               onClick={nextHand}
-              className="w-full py-4 bg-emerald-600 rounded font-bold text-lg"
+              disabled={busy}
+              className="w-full py-4 bg-emerald-600 rounded font-bold text-lg disabled:opacity-40"
             >
               Next Hand ▶
             </button>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../data/db";
@@ -67,6 +67,16 @@ export default function Setup() {
       }),
     []
   );
+
+  // One-shot guard for the mutations that end in a navigation (＋新規 /
+  // Start Hand). A second tap while one runs must be DROPPED, not queued —
+  // a rerun would mint a duplicate session or a second hand with the same
+  // handNo. The ref gives a synchronous re-entry check (state updates land
+  // too late for a double tap); the state disables the buttons. Shared by
+  // both flows so they can't interleave either. Held until nav() fires —
+  // the finally runs right after it.
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
 
   // sheets
   const [assignBtnMode, setAssignBtnMode] = useState(false);
@@ -275,105 +285,119 @@ export default function Setup() {
   // Start a brand-new session, cloning the current stakes/seat config so the
   // common case (same game, new sit-down) is one tap. Roster resets to Unknown.
   const newSession = async () => {
-    if (!session) return;
-    const now = Date.now();
-    const seatCount = session.seatCount;
-    const created = await Sessions.create({
-      date: new Date().toISOString().slice(0, 10),
-      startedAt: now,
-      endedAt: null,
-      casino: session.casino,
-      location: session.location,
-      gameType: session.gameType,
-      gameOther: session.gameOther,
-      sb: session.sb,
-      bb: session.bb,
-      ante: session.ante,
-      autoStraddle: session.autoStraddle,
-      straddleAmount: session.straddleAmount,
-      currency: session.currency,
-      exchangeRate: session.exchangeRate,
-      seatCount,
-      rake: session.rake,
-      heroSeat: null,
-      buttonSeat: null,
-      note: "",
-    });
-    for (let i = 1; i <= seatCount; i++) {
-      await Players.create({
-        sessionId: created.id,
-        seat: i,
-        name: "Unknown",
-        isHero: false,
-        isAway: false,
-        mustPostBB: false,
-        postWithAnte: false,
-        stack: 200,
+    if (!session || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const now = Date.now();
+      const seatCount = session.seatCount;
+      const created = await Sessions.create({
+        date: new Date().toISOString().slice(0, 10),
+        startedAt: now,
+        endedAt: null,
+        casino: session.casino,
+        location: session.location,
+        gameType: session.gameType,
+        gameOther: session.gameOther,
+        sb: session.sb,
+        bb: session.bb,
+        ante: session.ante,
+        autoStraddle: session.autoStraddle,
+        straddleAmount: session.straddleAmount,
+        currency: session.currency,
+        exchangeRate: session.exchangeRate,
+        seatCount,
+        rake: session.rake,
+        heroSeat: null,
+        buttonSeat: null,
         note: "",
       });
+      for (let i = 1; i <= seatCount; i++) {
+        await Players.create({
+          sessionId: created.id,
+          seat: i,
+          name: "Unknown",
+          isHero: false,
+          isAway: false,
+          mustPostBB: false,
+          postWithAnte: false,
+          stack: 200,
+          note: "",
+        });
+      }
+      nav(`/sessions/${created.id}/setup`);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
-    nav(`/sessions/${created.id}/setup`);
   };
 
   const startHand = async () => {
-    if (!ready) return;
-    const prev = await Hands.lastForSession(session.id);
-    const handNo = (prev?.handNo ?? 0) + 1;
-    const { dealt, joining } = resolveDealtSeats(
-      roster,
-      session.buttonSeat!,
-      session.seatCount
-    );
-    const seatsSnap = roster
-      .filter((p) => dealt.includes(p.seat))
-      .map((p) => ({
-        seat: p.seat,
-        name: p.name,
-        startStack: p.stack ?? 0,
-        posted: p.mustPostBB
-          ? [
-              { kind: "post" as const, amount: session.bb },
-              // The dead post-ante a returning player owes is the same as the
-              // table's BB-ante — not a fixed half-BB (which is one common
-              // house rule but far from universal). If no ante is configured
-              // we still skip this row even when postWithAnte is set.
-              ...(p.postWithAnte && session.ante > 0
-                ? [{ kind: "post_ante" as const, amount: session.ante }]
-                : []),
-            ]
-          : [],
-      }));
-    const h = await Hands.create({
-      sessionId: session.id,
-      handNo,
-      startedAt: Date.now(),
-      endedAt: null,
-      buttonSeat: session.buttonSeat!,
-      sb: session.sb,
-      bb: session.bb,
-      ante: session.ante,
-      autoStraddle: session.autoStraddle,
-      straddleAmount: session.straddleAmount,
-      seats: seatsSnap,
-      board: { flop: null, turn: null, river: null },
-      heroCards: null,
-      result: { winners: [], wentToShowdown: false, knownCards: [] },
-      pot: 0,
-      rake: 0,
-      note: "",
-      tags: [],
-      finalized: false,
-    });
-    for (const p of roster) {
-      const patch: Partial<SessionPlayer> = {};
-      if (p.mustPostBB || p.postWithAnte) {
-        patch.mustPostBB = false;
-        patch.postWithAnte = false;
+    if (!ready || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const prev = await Hands.lastForSession(session.id);
+      const handNo = (prev?.handNo ?? 0) + 1;
+      const { dealt, joining } = resolveDealtSeats(
+        roster,
+        session.buttonSeat!,
+        session.seatCount
+      );
+      const seatsSnap = roster
+        .filter((p) => dealt.includes(p.seat))
+        .map((p) => ({
+          seat: p.seat,
+          name: p.name,
+          startStack: p.stack ?? 0,
+          posted: p.mustPostBB
+            ? [
+                { kind: "post" as const, amount: session.bb },
+                // The dead post-ante a returning player owes is the same as the
+                // table's BB-ante — not a fixed half-BB (which is one common
+                // house rule but far from universal). If no ante is configured
+                // we still skip this row even when postWithAnte is set.
+                ...(p.postWithAnte && session.ante > 0
+                  ? [{ kind: "post_ante" as const, amount: session.ante }]
+                  : []),
+              ]
+            : [],
+        }));
+      const h = await Hands.create({
+        sessionId: session.id,
+        handNo,
+        startedAt: Date.now(),
+        endedAt: null,
+        buttonSeat: session.buttonSeat!,
+        sb: session.sb,
+        bb: session.bb,
+        ante: session.ante,
+        autoStraddle: session.autoStraddle,
+        straddleAmount: session.straddleAmount,
+        seats: seatsSnap,
+        board: { flop: null, turn: null, river: null },
+        heroCards: null,
+        result: { winners: [], wentToShowdown: false, knownCards: [] },
+        pot: 0,
+        rake: 0,
+        note: "",
+        tags: [],
+        finalized: false,
+      });
+      for (const p of roster) {
+        const patch: Partial<SessionPlayer> = {};
+        if (p.mustPostBB || p.postWithAnte) {
+          patch.mustPostBB = false;
+          patch.postWithAnte = false;
+        }
+        if (p.waitingForBB && joining.includes(p.seat)) patch.waitingForBB = false;
+        if (Object.keys(patch).length > 0) await Players.update(p.id, patch);
       }
-      if (p.waitingForBB && joining.includes(p.seat)) patch.waitingForBB = false;
-      if (Object.keys(patch).length > 0) await Players.update(p.id, patch);
+      nav(`/sessions/${session.id}/hands/${h.id}`);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
-    nav(`/sessions/${session.id}/hands/${h.id}`);
   };
 
   const heroPositionLabel = (() => {
@@ -390,7 +414,8 @@ export default function Setup() {
         <div className="flex-1 text-center font-bold">Session Setup</div>
         <button
           onClick={newSession}
-          className="text-emerald-400 text-sm px-2"
+          disabled={busy}
+          className="text-emerald-400 text-sm px-2 disabled:opacity-40"
           title="新規セッション"
         >
           ＋新規
@@ -597,8 +622,8 @@ export default function Setup() {
 
         <button
           onClick={startHand}
-          disabled={!ready}
-          className={`w-full py-4 rounded font-bold text-lg ${
+          disabled={!ready || busy}
+          className={`w-full py-4 rounded font-bold text-lg disabled:opacity-60 ${
             ready
               ? "bg-emerald-600 hover:bg-emerald-700"
               : "bg-neutral-800 opacity-60"

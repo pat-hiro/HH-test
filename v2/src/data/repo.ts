@@ -53,25 +53,36 @@ async function createRow<T extends Syncable>(
   return row;
 }
 
+/** Read-modify-write inside ONE transaction. Without it the get→put gap lets
+ *  two concurrent updates to different fields read the same base row and the
+ *  later put silently drop the earlier field (e.g. the result autosave racing
+ *  a note save). Dexie serializes rw transactions that share a table, so each
+ *  update merges onto the other's committed row instead. */
 async function updateRow<T extends Syncable>(
   table: Table<T, string>,
   id: string,
   patch: Partial<Omit<T, "id">>
 ): Promise<T | null> {
-  const existing = await table.get(id);
-  if (!existing) return null;
-  const next = { ...existing, ...patch, updatedAt: now() } as T;
-  await table.put(next);
-  return next;
+  return db.transaction("rw", table, async () => {
+    const existing = await table.get(id);
+    if (!existing) return null;
+    const next = { ...existing, ...patch, updatedAt: now() } as T;
+    await table.put(next);
+    return next;
+  });
 }
 
+/** Same transaction wrapper as updateRow — a concurrent update must never
+ *  read the pre-delete row and put it back alive (tombstone resurrection). */
 async function softDelete<T extends Syncable>(
   table: Table<T, string>,
   id: string
 ): Promise<void> {
-  const existing = await table.get(id);
-  if (!existing) return;
-  await table.put({ ...existing, deletedAt: now(), updatedAt: now() });
+  return db.transaction("rw", table, async () => {
+    const existing = await table.get(id);
+    if (!existing) return;
+    await table.put({ ...existing, deletedAt: now(), updatedAt: now() });
+  });
 }
 
 /** Index-seek the alive rows directly (deletedAt === 0). Replaces the v1
