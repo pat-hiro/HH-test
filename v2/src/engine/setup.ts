@@ -104,9 +104,13 @@ export function buildForcedBets(cfg: BlindConfig): ForcedBet[] {
     forced.push({ seat: bb, amount: cfg.bbAnte, kind: "ante", live: false });
   }
 
-  // miss-blind posts (live BB-sized + optional dead ante)
+  // miss-blind posts (live BB-sized + optional dead ante). If the posting
+  // seat lands on the natural BB this hand, the BB itself covers the live
+  // post — stacking both would double the seat's live commitment.
   for (const p of cfg.posts ?? []) {
-    forced.push({ seat: p.seat, amount: p.amount, kind: "post", live: true });
+    if (p.seat !== bb) {
+      forced.push({ seat: p.seat, amount: p.amount, kind: "post", live: true });
+    }
     if (p.ante && p.ante > 0) {
       forced.push({ seat: p.seat, amount: p.ante, kind: "ante", live: false });
     }

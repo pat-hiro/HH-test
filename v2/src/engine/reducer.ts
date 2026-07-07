@@ -95,13 +95,26 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
   const spentTotal: Record<number, number> = {};
   for (const s of allSeats) spentTotal[s] = 0;
 
-  // seed pot from forced bets (both live and dead contribute to spent/pot)
-  for (const f of setup.forced) {
-    spentTotal[f.seat] = (spentTotal[f.seat] ?? 0) + f.amount;
-  }
-
   const folded = new Set<number>();
   const allIn = new Set<number>();
+
+  // seed pot from forced bets (both live and dead contribute to spent/pot).
+  // Each entry's effective amount is capped by the seat's remaining stack —
+  // cumulative per seat, so a second forced bet only gets what's left.
+  const forcedEffective = setup.forced.map((f) => {
+    const behind = Math.max(
+      0,
+      startStackOf(setup, f.seat) - (spentTotal[f.seat] ?? 0)
+    );
+    const eff = Math.min(f.amount, behind);
+    spentTotal[f.seat] = (spentTotal[f.seat] ?? 0) + eff;
+    return eff;
+  });
+  // a seat whose forced bets consume its entire stack is all-in before ever
+  // taking a voluntary action, so it must not be dealt a turn to act
+  for (const s of allSeats) {
+    if (spentTotal[s] >= startStackOf(setup, s)) allIn.add(s);
+  }
 
   // The view we will return is the first street that is not yet complete.
   let view: HandState | null = null;
@@ -119,9 +132,10 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
     let lastRaiseSize = setup.bb; // floor for min-raise
     let reopenedBet = 0; // bet level at which action was last (re)opened by a FULL raise
     if (street === "PF") {
-      for (const f of setup.forced) {
-        if (f.live) live[f.seat] = (live[f.seat] ?? 0) + f.amount;
-      }
+      setup.forced.forEach((f, i) => {
+        // live commitments use the same stack-capped effective amounts
+        if (f.live) live[f.seat] = (live[f.seat] ?? 0) + forcedEffective[i];
+      });
       currentBet = Math.max(0, ...Object.values(live));
       reopenedBet = currentBet; // BB/straddle is the opening "raise"
       // the opening "bet" preflop is the big blind (or straddle): min reopen = 2x
@@ -145,8 +159,15 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
         continue;
       }
       if (a.amount > 0) {
-        live[a.seat] = (live[a.seat] ?? 0) + a.amount;
-        spentTotal[a.seat] = (spentTotal[a.seat] ?? 0) + a.amount;
+        // defensive clamp: a stored action can never spend more than the
+        // seat's remaining stack (protects pot/side pots from bad old data)
+        const behind = Math.max(
+          0,
+          startStackOf(setup, a.seat) - (spentTotal[a.seat] ?? 0)
+        );
+        const inc = Math.min(a.amount, behind);
+        live[a.seat] = (live[a.seat] ?? 0) + inc;
+        spentTotal[a.seat] = (spentTotal[a.seat] ?? 0) + inc;
         if (live[a.seat] > currentBet) {
           const raiseSize = live[a.seat] - currentBet;
           const isFullRaise = raiseSize >= lastRaiseSize;
@@ -343,7 +364,10 @@ export function moveToAction(setup: HandSetup, actions: Action[], move: Move): A
   const live = st.liveThisStreet[move.seat] ?? 0;
   let amount = 0;
   if (move.type === "call") {
-    amount = Math.max(0, st.currentBet - live);
+    // a call is capped by the remaining stack (all-in call for less)
+    const behind =
+      startStackOf(setup, move.seat) - (st.spentTotal[move.seat] ?? 0);
+    amount = Math.min(Math.max(0, st.currentBet - live), Math.max(0, behind));
   } else if (move.type === "bet" || move.type === "raise") {
     amount = move.to - live;
   } else if (move.type === "allin") {

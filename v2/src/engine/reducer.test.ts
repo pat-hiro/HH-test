@@ -389,6 +389,123 @@ describe("v2 regression: action moves clockwise from the most recent actor", () 
   });
 });
 
+describe("regression: a call is capped by the remaining stack (all-in call for less)", () => {
+  it("stack 50 calling a 200 bet records only the remaining 50, goes all-in, and layers the pots", () => {
+    // 4-handed: BTN=1 is the short stack (50), everyone else deep.
+    // Order preflop: UTG(4) → BTN(1) → SB(2) → BB(3).
+    const setup = makeSetup({
+      seats: [
+        { seat: 1, startStack: 50 },
+        { seat: 2, startStack: 500 },
+        { seat: 3, startStack: 500 },
+        { seat: 4, startStack: 500 },
+      ],
+      seatCount: 4,
+      buttonSeat: 1,
+      sb: 1,
+      bb: 2,
+    });
+    const { actions, states, final } = simulate(setup, [
+      { seat: 4, type: "raise", to: 200 }, // UTG makes it 200
+      { seat: 1, type: "call" }, // BTN calls for less (only 50 behind)
+      { seat: 2, type: "fold" },
+      { seat: 3, type: "fold" },
+    ]);
+    // the stored increment is the remaining stack, NOT currentBet - live
+    expect(actions[1]).toEqual({ street: "PF", seat: 1, type: "call", amount: 50 });
+    // spending the whole stack flips the seat to all-in via spentTotal >= startStack
+    const afterCall = states[2];
+    expect(afterCall.spentTotal[1]).toBe(50);
+    expect(afterCall.allIn).toContain(1);
+    // pot holds only chips that exist: 200 + 50 + sb 1 + bb 2
+    expect(final.pot).toBe(253);
+    // main pot takes everyone up to 50 (plus the dead blinds), the excess
+    // 150 is a side pot only the deep bettor is eligible for
+    expect(final.sidePots).toEqual([
+      { amount: 103, eligible: [1, 4] }, // 50*2 + sb 1 + bb 2 (blinds folded)
+      { amount: 150, eligible: [4] },
+    ]);
+  });
+});
+
+describe("regression: blinds alone can put a seat all-in before it ever acts", () => {
+  it("startStack == BB: the seat is all-in from the forced bet and never gets a turn", () => {
+    const seats = nineSeats.map((s) =>
+      s.seat === 3 ? { ...s, startStack: 2 } : s
+    );
+    const setup = makeSetup({ seats, seatCount: 9, buttonSeat: 1, sb: 1, bb: 2 });
+    // all-in from hand start, before any voluntary action
+    const opening = computeState(setup, []);
+    expect(opening.allIn).toContain(3);
+    expect(opening.currentSeat).toBe(4); // UTG opens as usual
+
+    // fold to the SB, SB completes — the BB must NOT be handed the option
+    const { states, final } = simulate(setup, [
+      { seat: 4, type: "fold" },
+      { seat: 5, type: "fold" },
+      { seat: 6, type: "fold" },
+      { seat: 7, type: "fold" },
+      { seat: 8, type: "fold" },
+      { seat: 9, type: "fold" },
+      { seat: 1, type: "fold" },
+      { seat: 2, type: "call" }, // SB completes to 2
+    ]);
+    for (const st of states) expect(st.currentSeat).not.toBe(3);
+    expect(final.street).toBe("F"); // PF closed without waiting on the all-in BB
+    expect(final.pot).toBe(4);
+  });
+
+  it("startStack < BB: the forced amount is capped so the pot only holds real chips", () => {
+    const seats = nineSeats.map((s) =>
+      s.seat === 3 ? { ...s, startStack: 1 } : s
+    );
+    const setup = makeSetup({ seats, seatCount: 9, buttonSeat: 1, sb: 1, bb: 2 });
+    const st = computeState(setup, []);
+    expect(st.spentTotal[3]).toBe(1); // not the nominal 2
+    expect(st.pot).toBe(2); // sb 1 + capped bb 1 — every chip exists
+    expect(st.allIn).toContain(3);
+  });
+
+  it("multiple forced bets on one seat cap cumulatively", () => {
+    // BB seat has 2 and owes ante 2 (dead) + bb 2: the ante eats the whole
+    // stack, so the bb's effective amount is 0 — pot = sb 1 + ante 2.
+    const seats = nineSeats.map((s) =>
+      s.seat === 3 ? { ...s, startStack: 2 } : s
+    );
+    const setup = makeSetup({
+      seats,
+      seatCount: 9,
+      buttonSeat: 1,
+      sb: 1,
+      bb: 2,
+      bbAnte: 2,
+    });
+    const st = computeState(setup, []);
+    expect(st.spentTotal[3]).toBe(2);
+    expect(st.pot).toBe(3);
+    expect(st.allIn).toContain(3);
+  });
+});
+
+describe("regression: a miss-blind post on the natural BB seat must not double the blind", () => {
+  it("post lands on the BB seat → live commitment is one BB, pot counts it once", () => {
+    // base(): BTN=1 → BB is seat 3. Give that same seat a mustPostBB post.
+    const setup = base({ posts: [{ seat: 3, amount: 2 }] });
+    const st = computeState(setup, []);
+    expect(st.liveThisStreet[3]).toBe(2); // the natural BB covers the post
+    expect(st.currentBet).toBe(2);
+    expect(st.pot).toBe(3); // sb 1 + bb 2, nothing double-counted
+  });
+
+  it("the dead ante attached to such a post is still collected", () => {
+    const setup = base({ posts: [{ seat: 3, amount: 2, ante: 1 }] });
+    const st = computeState(setup, []);
+    expect(st.liveThisStreet[3]).toBe(2); // ante is dead, live stays one BB
+    expect(st.currentBet).toBe(2);
+    expect(st.pot).toBe(4); // sb 1 + bb 2 + dead ante 1
+  });
+});
+
 describe("resolveDealtSeats — mid-session BB-wait joiners", () => {
   const P = (
     seat: number,
