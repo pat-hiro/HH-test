@@ -211,6 +211,14 @@ export default function Hand() {
     return null;
   })();
 
+  // Board slots belonging to the CURRENT street, regardless of whether it's
+  // already partially filled (unlike boardRequirement, which goes null once
+  // any card for the street is present). Used to scope "残りを不明" so a
+  // manually-opened sheet on a partially-entered street only fills that
+  // street's remaining slots, not later streets.
+  const currentStreetSlots =
+    state?.street === "F" ? [0, 1, 2] : state?.street === "T" ? [3] : state?.street === "R" ? [4] : [];
+
   // Show the result panel only once betting is done AND any required run-out
   // board has been entered (or the hand folded out).
   const showResult =
@@ -791,8 +799,14 @@ export default function Hand() {
 
   const survivors = state.inHand;
   // Clamp to [0, pot]: a negative or pot-exceeding rake would drive winners
-  // negative / oversized through every distributable-pot path below.
-  const rakeNum = Math.min(Math.max(0, parseFloat(rake) || 0), state.pot);
+  // negative / oversized through every distributable-pot path below. Rounded
+  // to cents up front so this matches deductRake's internal cent-rounding —
+  // otherwise a sub-cent rake (e.g. 0.005) desyncs the finalize consistency
+  // check (winTotal + rakeNum) from the actually-deducted amount.
+  const rakeNum = Math.min(
+    Math.max(0, Math.round((parseFloat(rake) || 0) * 100) / 100),
+    state.pot
+  );
   // The chips available to distribute after rake. Winners should total this;
   // with rake=0 it collapses to the whole pot (unchanged behaviour).
   const distributablePot = state.pot - rakeNum;
@@ -1575,9 +1589,7 @@ export default function Hand() {
           startSlot={boardSheetSlot}
           hero={hand.heroCards}
           exclude={board.filter(isRealCard)}
-          unknownSlots={
-            bettingDone ? [0, 1, 2, 3, 4] : boardRequirement?.slots ?? []
-          }
+          unknownSlots={bettingDone ? [0, 1, 2, 3, 4] : currentStreetSlots}
           onSubmit={submitBoard}
           onCancel={() => setBoardSheetSlot(null)}
           onClear={clearBoard}
