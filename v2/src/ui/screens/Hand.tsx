@@ -8,6 +8,7 @@ import { computeState, moveToAction } from "../../engine/reducer";
 import type { Move } from "../../engine/reducer";
 import type { Action as EngineAction, HandState, Street } from "../../engine/types";
 import type { Action as StoredAction, SessionPlayer } from "../../data/types";
+import { applySeatDeltas, reverseSeatDeltas, seatDeltas } from "../../data/stacks";
 import PokerTable from "../components/PokerTable";
 import type { SeatVM } from "../components/PokerTable";
 import PlayingCard from "../components/PlayingCard";
@@ -122,6 +123,13 @@ export default function Hand() {
     () => (sessionId ? Players.forSession(sessionId) : []),
     [sessionId]
   );
+  // The session's last hand — a re-opened hand that ISN'T this one gets a
+  // 再確定 button (re-finalize in place) instead of Next Hand (which mints a
+  // new hand). See nextHand / reconfirm below.
+  const lastHand = useLiveQuery(
+    () => (sessionId ? Hands.lastForSession(sessionId) : undefined),
+    [sessionId]
+  );
   const { hand, setup, state } = useEngineState(handId);
 
   const [pending, setPending] = useState<null | "BET" | "RAISE" | "ALL_IN">(null);
@@ -148,6 +156,11 @@ export default function Hand() {
   // until nav() fires — the finally runs right after it.
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
+
+  // One-shot guard for Re-open: a double tap must not reverse the stack deltas
+  // twice (the liveQuery `finalized:false` lands too late to gate the second
+  // tap synchronously).
+  const reopenRef = useRef(false);
 
   // result-entry state, seeded once when the hand becomes complete.
   // `resultSeeded` is STATE, not a ref, on purpose: the autosave below must
@@ -281,6 +294,30 @@ export default function Hand() {
     );
   }
 
+  // A soft-deleted hand must not be editable even via a direct URL — show a
+  // tombstone notice only. Review hides deleted hands from its list, but the
+  // play screen is reachable by URL, so it guards independently.
+  if (hand.deletedAt > 0) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center text-neutral-500 gap-3 text-sm">
+        <div>削除済みハンドです</div>
+        <button
+          onClick={() => nav(`/sessions/${session.id}/setup`)}
+          className="mt-2 px-4 py-2 bg-neutral-800 rounded"
+        >
+          Session Setup に戻る
+        </button>
+      </div>
+    );
+  }
+
+  // A finalized hand is view-only until the user re-opens it (below) — its
+  // pot/result and the stack deltas are already committed, so unguarded edits
+  // would desync the action log from the saved result and the roster stacks.
+  const readOnly = hand.finalized;
+  // Is THIS hand the session's most recent one? Drives Next Hand vs 再確定.
+  const isLatest = !!lastHand && lastHand.id === hand.id;
+
   // ----- VM (read-only) ------------------------------------------------------
 
   const activeSeats = hand.seats.map((s) => s.seat);
@@ -410,7 +447,7 @@ export default function Hand() {
   /** Resolve `intent` against the freshest engine state, then append the
    *  resulting action atomically. `resolve` returns null to abort. */
   function commit(resolve: (st: HandState) => Move | null) {
-    if (!setup || !handId) return;
+    if (!setup || !handId || readOnly) return;
     return withLock(async () => {
       const ea = await freshEngineActions();
       const st = computeState(setup, ea);
@@ -430,7 +467,7 @@ export default function Hand() {
 
   const onTapSeat = (seat: number) =>
     withLock(async () => {
-      if (!setup || !handId) return;
+      if (!setup || !handId || readOnly) return;
       // Defensive: refuse to advance to a seat that the engine never sees (e.g.
       // a freshly emptied chair that's no longer in the hand snapshot). Without
       // this guard, the loop below would fold every remaining seat in pursuit
@@ -502,9 +539,13 @@ export default function Hand() {
       await Actions.appendMany(handId, rows);
     });
 
-  const onTapBoardSlot = (i: number) => setBoardSheetSlot(i);
+  const onTapBoardSlot = (i: number) => {
+    if (readOnly) return;
+    setBoardSheetSlot(i);
+  };
 
   const submitBoard = async (slots: (string | null)[]) => {
+    if (readOnly) return;
     // partial entry is allowed: keep any non-null flop slot, collapse to null
     // only when ALL three are empty
     const hasAnyFlop = !!(slots[0] || slots[1] || slots[2]);
@@ -522,6 +563,7 @@ export default function Hand() {
   };
 
   const clearBoard = async () => {
+    if (readOnly) return;
     await Hands.update(hand.id, { board: { flop: null, turn: null, river: null } });
     setBoardSheetSlot(null);
   };
@@ -559,6 +601,7 @@ export default function Hand() {
   const submitAmount = async (amt: number) => {
     const kind = pending;
     setPending(null);
+    if (readOnly) return;
     if (kind === "BET" || kind === "RAISE") {
       const type = kind === "BET" ? "bet" : "raise";
       await commit((st) => {
@@ -619,7 +662,8 @@ export default function Hand() {
 
   const undo = () =>
     withLock(async () => {
-      if (handId) await Actions.popLast(handId);
+      if (readOnly || !handId) return;
+      await Actions.popLast(handId);
     });
 
   /** Undo every action on the current street + clear the board cards that
@@ -627,7 +671,7 @@ export default function Hand() {
    *  was different" and wants a single tap to back out the street. */
   const undoStreet = () =>
     withLock(async () => {
-      if (!handId || !setup) return;
+      if (!handId || !setup || readOnly) return;
       const rows = await Actions.forHand(handId);
       const cur = computeState(
         setup,
@@ -656,6 +700,7 @@ export default function Hand() {
     });
 
   const saveHeroCards = async (cards: (string | null)[]) => {
+    if (readOnly) return;
     const c0 = cards[0];
     const c1 = cards[1];
     await Hands.update(hand.id, {
@@ -665,11 +710,13 @@ export default function Hand() {
   };
 
   const saveNote = async (note: string) => {
+    if (readOnly) return;
     await Hands.update(hand.id, { note });
     setNoteOpen(false);
   };
 
   const saveKnownCards = async (seat: number, cards: (string | null)[]) => {
+    if (readOnly) return;
     const c0 = cards[0];
     const c1 = cards[1];
     setKnownCards((prev) => {
@@ -733,7 +780,7 @@ export default function Hand() {
 
   const foldAll = () =>
     withLock(async () => {
-      if (!setup || !handId) return;
+      if (!setup || !handId || readOnly) return;
       const st = computeState(setup, await freshEngineActions());
       // Fold every seat that still OWES chips on this street (live < currentBet).
       // Seats that already matched the current bet — callers, the bettor /
@@ -766,7 +813,7 @@ export default function Hand() {
    *  the next street even if the engine would advance. */
   const checkThru = () =>
     withLock(async () => {
-      if (!setup || !handId) return;
+      if (!setup || !handId || readOnly) return;
       const work0 = await freshEngineActions();
       const startStreet = computeState(setup, work0).street;
       let work = [...work0];
@@ -804,53 +851,116 @@ export default function Hand() {
     return ws;
   };
 
+  /** Finalize THIS hand: pay-out consistency guard, persist pot/result, and
+   *  apply the per-seat stack deltas to the roster. Shared by Next Hand and
+   *  再確定 (re-confirm). Returns false if the user aborted at the mismatch
+   *  prompt so the caller can bail out before advancing. */
+  const finalizeCurrentHand = async (): Promise<boolean> => {
+    const winners = buildWinners();
+    const winTotal = winners.reduce((s, w) => s + w.amount, 0);
+    // Never persist a hand whose recorded pay-outs don't match the pot — that
+    // miscount silently corrupts every downstream stack delta. Warn-confirm
+    // instead of failing silently so the user can still proceed (e.g. when
+    // they intentionally don't know who won a side pot).
+    if (winTotal !== state.pot) {
+      const diff = state.pot - winTotal;
+      const sign = diff > 0 ? "+" : "";
+      if (
+        !confirm(
+          `配分の合計がポットと一致しません（差: ${sign}${diff}）。このまま確定しますか？`
+        )
+      )
+        return false;
+    }
+    const knownArr = Object.entries(knownCards).map(([seat, cards]) => ({
+      seat: Number(seat),
+      cards,
+    }));
+    await Hands.update(hand.id, {
+      finalized: true,
+      endedAt: Date.now(),
+      pot: state.pot,
+      result: {
+        winners,
+        wentToShowdown: showdown,
+        knownCards: knownArr,
+      },
+    });
+
+    // apply the per-seat stack deltas (won − spent) to the session roster.
+    const deltas = seatDeltas(winners, state.spentTotal);
+    const roster = await Players.forSession(session.id);
+    const bySeat = new Map(roster.map((p) => [p.seat, p]));
+    const rosterStacks = hand.seats
+      .filter((s) => bySeat.has(s.seat))
+      .map((s) => ({
+        seat: s.seat,
+        stack: bySeat.get(s.seat)!.stack,
+        startStack: s.startStack,
+      }));
+    for (const c of applySeatDeltas(rosterStacks, deltas)) {
+      await Players.update(bySeat.get(c.seat)!.id, { stack: c.stack });
+    }
+    return true;
+  };
+
+  /** Re-open a finalized hand for correction: reverse the stack deltas the
+   *  finalize applied (restoring pre-hand stacks), then flip finalized:false.
+   *  The result draft is already seeded from hand.result by the effect above,
+   *  so the normal edit flow takes over. */
+  const reopen = async () => {
+    if (!hand.finalized || reopenRef.current) return;
+    if (
+      !confirm(
+        "このハンドを再オープンして修正します。確定時に反映したスタックの増減を元に戻します。よろしいですか？"
+      )
+    )
+      return;
+    reopenRef.current = true;
+    try {
+      const deltas = seatDeltas(hand.result.winners, state.spentTotal);
+      const roster = await Players.forSession(session.id);
+      const bySeat = new Map(roster.map((p) => [p.seat, p]));
+      const rosterStacks = hand.seats
+        .filter((s) => bySeat.has(s.seat))
+        .map((s) => ({
+          seat: s.seat,
+          stack: bySeat.get(s.seat)!.stack,
+          startStack: s.startStack,
+        }));
+      for (const c of reverseSeatDeltas(rosterStacks, deltas)) {
+        await Players.update(bySeat.get(c.seat)!.id, { stack: c.stack });
+      }
+      await Hands.update(hand.id, { finalized: false });
+    } finally {
+      reopenRef.current = false;
+    }
+  };
+
+  /** Re-confirm an OLDER re-opened hand in place: same finalize as Next Hand
+   *  but WITHOUT minting a new hand or rotating the button (those advance the
+   *  session, which a correction to a past hand must not do). */
+  const reconfirm = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await finalizeCurrentHand();
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
   const nextHand = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     try {
-      const winners = buildWinners();
-      const winTotal = winners.reduce((s, w) => s + w.amount, 0);
-      // Never persist a hand whose recorded pay-outs don't match the pot — that
-      // miscount silently corrupts every downstream stack delta. Warn-confirm
-      // instead of failing silently so the user can still proceed (e.g. when
-      // they intentionally don't know who won a side pot).
-      if (winTotal !== state.pot) {
-        const diff = state.pot - winTotal;
-        const sign = diff > 0 ? "+" : "";
-        if (
-          !confirm(
-            `配分の合計がポットと一致しません（差: ${sign}${diff}）。このまま次のハンドへ進みますか？`
-          )
-        )
-          return;
-      }
-      const knownArr = Object.entries(knownCards).map(([seat, cards]) => ({
-        seat: Number(seat),
-        cards,
-      }));
-      await Hands.update(hand.id, {
-        finalized: true,
-        endedAt: Date.now(),
-        pot: state.pot,
-        result: {
-          winners,
-          wentToShowdown: showdown,
-          knownCards: knownArr,
-        },
-      });
+      if (!(await finalizeCurrentHand())) return;
 
-      // rotate BTN to next active seat, update player stacks from the result
+      // rotate BTN to next active seat
       const next = nextActive(hand.buttonSeat, session.seatCount, activeSeats) ?? hand.buttonSeat;
-      const roster = await Players.forSession(session.id);
-      for (const p of roster) {
-        const snap = hand.seats.find((s) => s.seat === p.seat);
-        if (!snap) continue;
-        const won = winners.find((w) => w.seat === p.seat)?.amount ?? 0;
-        const delta = won - (state.spentTotal[p.seat] ?? 0);
-        const newStack = (p.stack ?? snap.startStack) + delta;
-        if (newStack !== p.stack) await Players.update(p.id, { stack: newStack });
-      }
       await Sessions.update(session.id, { buttonSeat: next });
 
       // create next hand snapshot — honour mid-session joiners: players posting
@@ -970,6 +1080,19 @@ export default function Hand() {
         </button>
       </div>
 
+      {/* Finalized banner — the hand is view-only until re-opened. */}
+      {readOnly && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-950/60 border-b border-emerald-800 text-sm">
+          <span className="text-emerald-300 font-semibold">✔ 確定済み（閲覧のみ）</span>
+          <button
+            onClick={reopen}
+            className="ml-auto px-3 py-1.5 bg-amber-600 rounded text-xs font-bold"
+          >
+            再オープンして修正
+          </button>
+        </div>
+      )}
+
       <div className="px-2 pt-2">
         <PokerTable
           totalSeats={session.seatCount}
@@ -978,17 +1101,21 @@ export default function Hand() {
           streetLabel={streetTitle(state.street)}
           board={board}
           onTapSeat={onTapSeat}
-          onTapEmptySeat={(seat) => setSeatingSeat(seat)}
+          onTapEmptySeat={(seat) => {
+            if (!readOnly) setSeatingSeat(seat);
+          }}
           onTapBoardSlot={onTapBoardSlot}
           bb={hand.bb}
         />
       </div>
 
-      {/* Hero cards + note row — available throughout the hand */}
+      {/* Hero cards + note row — available throughout the hand (disabled while
+          the hand is finalized / view-only). */}
       <div className="px-2 pt-1.5 flex gap-2">
         <button
           onClick={() => setHeroCardsOpen(true)}
-          className="flex-1 py-1.5 bg-neutral-800 rounded text-sm"
+          disabled={readOnly}
+          className="flex-1 py-1.5 bg-neutral-800 rounded text-sm disabled:opacity-40"
         >
           Hero:{" "}
           <span className="font-mono">
@@ -997,13 +1124,15 @@ export default function Hand() {
         </button>
         <button
           onClick={() => setNoteOpen(true)}
-          className={`flex-1 py-1.5 rounded text-sm ${hand.note ? "bg-blue-900/50 border border-blue-700" : "bg-neutral-800"}`}
+          disabled={readOnly}
+          className={`flex-1 py-1.5 rounded text-sm disabled:opacity-40 ${hand.note ? "bg-blue-900/50 border border-blue-700" : "bg-neutral-800"}`}
         >
           ✎ メモ{hand.note ? " ●" : ""}
         </button>
         <button
           onClick={() => setEventOpen(true)}
-          className={`flex-1 py-1.5 rounded text-sm ${(handEvents?.length ?? 0) > 0 ? "bg-purple-900/50 border border-purple-700" : "bg-neutral-800"}`}
+          disabled={readOnly}
+          className={`flex-1 py-1.5 rounded text-sm disabled:opacity-40 ${(handEvents?.length ?? 0) > 0 ? "bg-purple-900/50 border border-purple-700" : "bg-neutral-800"}`}
         >
           ⚑ Event
           {(handEvents?.length ?? 0) > 0 ? ` ${handEvents!.length}` : ""}
@@ -1013,7 +1142,12 @@ export default function Hand() {
       <div className="flex-1 p-2 space-y-1.5">
         {showResult ? (
           <div className="space-y-3">
-            <div className="bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2">
+            {/* fieldset disabled propagates to every input/button inside, so a
+                finalized hand's result panel is read-only in one place. */}
+            <fieldset
+              disabled={readOnly}
+              className="bg-neutral-900 border border-neutral-800 rounded p-3 space-y-2 min-w-0"
+            >
               <div className="flex items-center justify-between">
                 <div className="text-sm font-bold">結果</div>
                 <div className="text-sm text-neutral-300">Pot {fmtChips(state.pot)}</div>
@@ -1187,7 +1321,7 @@ export default function Hand() {
                               {cards ? "カードを編集" : "タップで入力"}
                             </div>
                           </div>
-                          {cards && (
+                          {cards && !readOnly && (
                             <div
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1210,15 +1344,28 @@ export default function Hand() {
                   </div>
                 </div>
               )}
-            </div>
+            </fieldset>
 
-            <button
-              onClick={nextHand}
-              disabled={busy}
-              className="w-full py-4 bg-emerald-600 rounded font-bold text-lg disabled:opacity-40"
-            >
-              Next Hand ▶
-            </button>
+            {/* Finalized → the top banner drives re-open. Otherwise: the latest
+                hand advances to a new hand; a re-opened older hand re-confirms
+                in place (再確定). */}
+            {readOnly ? null : isLatest ? (
+              <button
+                onClick={nextHand}
+                disabled={busy}
+                className="w-full py-4 bg-emerald-600 rounded font-bold text-lg disabled:opacity-40"
+              >
+                Next Hand ▶
+              </button>
+            ) : (
+              <button
+                onClick={reconfirm}
+                disabled={busy}
+                className="w-full py-4 bg-emerald-600 rounded font-bold text-lg disabled:opacity-40"
+              >
+                再確定
+              </button>
+            )}
           </div>
         ) : (
           <>

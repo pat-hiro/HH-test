@@ -333,12 +333,18 @@ function HandDetail({ hand }: { hand: Hand }) {
       )}
 
       <div className="flex gap-2 pt-1">
-        <button
-          onClick={() => nav(`/sessions/${hand.sessionId}/hands/${hand.id}`)}
-          className="px-3 py-1 bg-blue-600 rounded text-xs font-bold"
-        >
-          編集
-        </button>
+        {/* No Edit link for a soft-deleted hand — the play screen refuses to
+            edit tombstoned hands anyway, but don't invite it. (The list above
+            already filters tombstones out, so this is a belt-and-braces guard
+            that keeps the invariant local to the Edit affordance.) */}
+        {hand.deletedAt === 0 && (
+          <button
+            onClick={() => nav(`/sessions/${hand.sessionId}/hands/${hand.id}`)}
+            className="px-3 py-1 bg-blue-600 rounded text-xs font-bold"
+          >
+            編集
+          </button>
+        )}
         <a
           href={gtoWizardLink(hand)}
           target="_blank"
