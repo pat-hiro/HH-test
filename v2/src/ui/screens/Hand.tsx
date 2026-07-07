@@ -20,7 +20,7 @@ import EventSheet from "../components/EventSheet";
 import { PlayerEditSheet } from "../components/SetupSheets";
 import { positionLabels } from "../positions";
 import { fmtChips } from "../fmt";
-import { splitEvenly as splitPot } from "../split";
+import { deductRake, splitEvenly as splitPot } from "../split";
 import { suggestedRake } from "../rake";
 import { isRealCard } from "../cards";
 
@@ -247,10 +247,19 @@ export default function Hand() {
     setResultSeeded(true);
     const survivors = state.inHand;
     const r = hand.result;
-    // Seed the rake input: a saved rake wins (re-open), else the session's
-    // rake-config suggestion. Either way it's just a prefill the user can edit.
-    const seededRake =
-      hand.rake > 0 ? hand.rake : suggestedRake(state.pot, session.rake);
+    // Seed the rake input: a finalized hand's saved rake wins VERBATIM — an
+    // explicit 0 must not be replaced by the suggestion on re-open. Only an
+    // unfinalized hand with no saved rake gets the session rake-config
+    // prefill. Clamped to [0, pot] so bad old data can't seed out of range.
+    const seededRake = Math.min(
+      Math.max(
+        0,
+        hand.finalized || hand.rake > 0
+          ? hand.rake
+          : suggestedRake(state.pot, session.rake)
+      ),
+      state.pot
+    );
     setRake(seededRake > 0 ? String(seededRake) : "");
     // Winners must total pot − rake, so seed the single-survivor default (and
     // every "assign all / split" helper below) off the post-rake distributable.
@@ -334,6 +343,10 @@ export default function Hand() {
   const readOnly = hand.finalized;
   // Is THIS hand the session's most recent one? Drives Next Hand vs 再確定.
   const isLatest = !!lastHand && lastHand.id === hand.id;
+  // lastHand === undefined means the liveQuery hasn't resolved yet — NOT that
+  // this hand is stale. Deciding Next Hand vs 再確定 before it loads would
+  // flash 再確定 on the true latest hand (which skips the button rotation).
+  const lastHandLoaded = lastHand !== undefined;
 
   // ----- VM (read-only) ------------------------------------------------------
 
@@ -341,7 +354,9 @@ export default function Hand() {
   const positions = positionLabels(activeSeats, hand.buttonSeat);
   const foldedSet = new Set(state.folded);
   const allInSet = new Set(state.allIn);
-  const heroSeat = session.heroSeat;
+  // The hand's own hero snapshot wins over the live session value, so a past
+  // hand opened after the hero moved seats still renders at the old seat.
+  const heroSeat = hand.heroSeat ?? session.heroSeat;
   const board: (string | null)[] = [
     hand.board.flop?.[0] ?? null,
     hand.board.flop?.[1] ?? null,
@@ -724,19 +739,23 @@ export default function Hand() {
         ofStreet = rows.filter((a) => a.street === target);
       }
       for (const a of ofStreet) await Actions.remove(a.id);
-      if (target === "F") {
+      // Board clears key off CUR (the street being backed out of), not
+      // target: with zero actions on cur the action rewind targets the
+      // PREVIOUS street, but the board cards entered when crossing INTO cur
+      // must still be wiped or they'd survive the undo.
+      if (cur === "F") {
         await Hands.update(hand.id, {
           board: { ...hand.board, flop: null, turn: null, river: null },
         });
-      } else if (target === "T") {
+      } else if (cur === "T") {
         await Hands.update(hand.id, {
           board: { ...hand.board, turn: null, river: null },
         });
-      } else if (target === "R") {
+      } else if (cur === "R") {
         await Hands.update(hand.id, { board: { ...hand.board, river: null } });
       }
       // also wipe the auto-prompt memo so the next visit re-prompts cleanly
-      promptedRef.current[target] = false;
+      promptedRef.current[cur] = false;
     });
 
   const saveHeroCards = async (cards: (string | null)[]) => {
@@ -771,10 +790,15 @@ export default function Hand() {
   // ----- result entry (shown when the hand is complete) --------------------
 
   const survivors = state.inHand;
-  const rakeNum = parseFloat(rake) || 0;
+  // Clamp to [0, pot]: a negative or pot-exceeding rake would drive winners
+  // negative / oversized through every distributable-pot path below.
+  const rakeNum = Math.min(Math.max(0, parseFloat(rake) || 0), state.pot);
   // The chips available to distribute after rake. Winners should total this;
   // with rake=0 it collapses to the whole pot (unchanged behaviour).
   const distributablePot = state.pot - rakeNum;
+  // Side pots as shown/assigned in the result panel: the rake is already
+  // deducted proportionally, so assigning every pot still totals pot − rake.
+  const rakedSidePots = deductRake(state.sidePots, rakeNum);
   const sharesTotal = Object.values(shares).reduce(
     (s, v) => s + (parseFloat(v) || 0),
     0
@@ -808,10 +832,9 @@ export default function Hand() {
     const basePots = state.sidePots.length > 0
       ? state.sidePots
       : [{ amount: state.pot, eligible: survivors }];
-    // Take rake off the top (the main pot) so the split totals pot − rake.
-    const pots = basePots.map((p, i) =>
-      i === 0 ? { ...p, amount: Math.max(0, p.amount - rakeNum) } : p
-    );
+    // Deduct the rake across ALL pots proportionally so the split totals
+    // exactly pot − rake even when the rake exceeds the main pot alone.
+    const pots = deductRake(basePots, rakeNum);
     for (const pot of pots) {
       const winners = pot.eligible.filter((s) => survSet.has(s));
       if (winners.length === 0) continue;
@@ -1091,8 +1114,16 @@ export default function Hand() {
   // BB option / facing a raise — both allow Raise. Show alongside Check when
   // there's a live bet but I owe nothing (e.g., BB in a limped pot). Suppressed
   // when state.canRaise is false (e.g., facing a partial all-in: call only).
+  // Also require actual chips beyond the call — a stack that exactly covers
+  // toCall has no raise room, and "raising" it would store a call-sized raise
+  // (matches the DragInput gating in HandDrag).
   const canRaise =
-    state.currentBet > 0 && state.currentSeat !== null && state.canRaise;
+    state.currentBet > 0 &&
+    state.currentSeat !== null &&
+    state.canRaise &&
+    state.toCall <
+      maxTotalFor(state, state.currentSeat) -
+        (state.liveThisStreet[state.currentSeat] ?? 0);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -1227,7 +1258,7 @@ export default function Hand() {
                       クリア
                     </button>
                   </div>
-                  {state.sidePots.map((sp, idx) => (
+                  {rakedSidePots.map((sp, idx) => (
                     <div key={idx} className="space-y-1">
                       <div className="text-[11px] text-neutral-300">
                         {idx === 0 ? "Main" : `Side ${idx}`}: ${sp.amount}{" "}
@@ -1306,6 +1337,8 @@ export default function Hand() {
                 <input
                   type="number"
                   inputMode="decimal"
+                  min={0}
+                  max={state.pot}
                   onFocus={(e) => e.currentTarget.select()}
                   value={rake}
                   onChange={(e) => setRake(e.target.value)}
@@ -1415,8 +1448,16 @@ export default function Hand() {
 
             {/* Finalized → the top banner drives re-open. Otherwise: the latest
                 hand advances to a new hand; a re-opened older hand re-confirms
-                in place (再確定). */}
-            {readOnly ? null : isLatest ? (
+                in place (再確定). While lastHand is still loading we can't tell
+                which — show a disabled placeholder instead of guessing. */}
+            {readOnly ? null : !lastHandLoaded ? (
+              <button
+                disabled
+                className="w-full py-4 bg-emerald-600 rounded font-bold text-lg opacity-40"
+              >
+                …
+              </button>
+            ) : isLatest ? (
               <button
                 onClick={nextHand}
                 disabled={busy}
@@ -1534,6 +1575,9 @@ export default function Hand() {
           startSlot={boardSheetSlot}
           hero={hand.heroCards}
           exclude={board.filter(isRealCard)}
+          unknownSlots={
+            bettingDone ? [0, 1, 2, 3, 4] : boardRequirement?.slots ?? []
+          }
           onSubmit={submitBoard}
           onCancel={() => setBoardSheetSlot(null)}
           onClear={clearBoard}

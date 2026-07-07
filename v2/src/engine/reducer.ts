@@ -132,11 +132,19 @@ export function computeState(setup: HandSetup, actions: Action[]): HandState {
     let lastRaiseSize = setup.bb; // floor for min-raise
     let reopenedBet = 0; // bet level at which action was last (re)opened by a FULL raise
     if (street === "PF") {
+      // Real chips (live/spentTotal/pot) use the stack-capped effective
+      // amounts, but the BET LEVEL is set by the NOMINAL forced amounts: a BB
+      // short-stacked into a forced all-in (e.g. stack 1 at 1/2) must not
+      // lower currentBet below the table's blind — later seats still owe the
+      // full nominal BB/straddle to play, and min-raise math keys off it too.
+      const nominalLive: Record<number, number> = {};
       setup.forced.forEach((f, i) => {
-        // live commitments use the same stack-capped effective amounts
-        if (f.live) live[f.seat] = (live[f.seat] ?? 0) + forcedEffective[i];
+        if (f.live) {
+          live[f.seat] = (live[f.seat] ?? 0) + forcedEffective[i];
+          nominalLive[f.seat] = (nominalLive[f.seat] ?? 0) + f.amount;
+        }
       });
-      currentBet = Math.max(0, ...Object.values(live));
+      currentBet = Math.max(0, ...Object.values(nominalLive));
       reopenedBet = currentBet; // BB/straddle is the opening "raise"
       // the opening "bet" preflop is the big blind (or straddle): min reopen = 2x
       lastRaiseSize = currentBet > 0 ? currentBet : setup.bb;

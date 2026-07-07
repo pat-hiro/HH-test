@@ -26,6 +26,7 @@ export default function BoardCardSheet({
   startSlot,
   hero,
   exclude,
+  unknownSlots,
   onSubmit,
   onCancel,
   onClear,
@@ -34,6 +35,11 @@ export default function BoardCardSheet({
   startSlot: number;
   hero?: [string, string] | null;
   exclude: string[];
+  /** Slot indices "残りを不明（?）で確定" may fill. During betting only the
+   *  current street's slots are being requested — filling turn/river with ?
+   *  would suppress their input prompts. A run-out (betting done) passes all
+   *  five. Defaults to all slots when omitted. */
+  unknownSlots?: number[];
   onSubmit: (board: (string | null)[]) => void;
   onCancel: () => void;
   onClear: () => void;
@@ -83,12 +89,16 @@ export default function BoardCardSheet({
     if (nxt !== -1) setActive(nxt);
   };
 
-  /** Fill every still-empty slot with UNKNOWN_CARD and submit — the "I don't
-   *  remember the rest of the board, just let me record the result" escape
-   *  hatch for a multiway all-in run-out. Slots already holding a real card
-   *  (or an explicit unknown) are left untouched. */
+  /** Fill every still-empty slot that is currently being requested (see
+   *  unknownSlots) with UNKNOWN_CARD and submit — the "I don't remember the
+   *  rest of the board, just let me record the result" escape hatch for a
+   *  multiway all-in run-out. Slots already holding a real card (or an
+   *  explicit unknown) are left untouched. */
   const confirmRestUnknown = () => {
-    onSubmit(slots.map((c) => (c === null ? UNKNOWN_CARD : c)));
+    const fillable = new Set(unknownSlots ?? [0, 1, 2, 3, 4]);
+    onSubmit(
+      slots.map((c, i) => (c === null && fillable.has(i) ? UNKNOWN_CARD : c))
+    );
   };
 
   /** Confirm before wiping the entire board (flop+turn+river) since the

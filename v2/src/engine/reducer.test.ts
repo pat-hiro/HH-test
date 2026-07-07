@@ -506,6 +506,29 @@ describe("regression: a miss-blind post on the natural BB seat must not double t
   });
 });
 
+describe("G1 regression: PF bet-level uses the nominal forced amount, not the capped chips", () => {
+  it("BB short all-in below the nominal BB: toCall/minRaise key off the nominal BB, pot only holds real chips, and the BB never gets a turn", () => {
+    const seats = nineSeats.map((s) => (s.seat === 3 ? { ...s, startStack: 1 } : s));
+    const setup = makeSetup({ seats, seatCount: 9, buttonSeat: 1, sb: 1, bb: 2 });
+    const st = computeState(setup, []);
+    expect(st.currentSeat).toBe(4); // UTG opens; the all-in BB is skipped
+    expect(st.toCall).toBe(2); // UTG owes the nominal BB (2), not the capped 1
+    expect(st.minRaiseTo).toBe(4); // min open = 2x the nominal BB
+    expect(st.pot).toBe(2); // sb 1 + capped bb 1 — only chips that actually exist
+    expect(st.allIn).toContain(3);
+  });
+
+  it("normal (deep-stacked) blinds: nominal and effective amounts match, so behavior is unchanged", () => {
+    const setup = base(); // all seats start with 200, well above the blinds
+    const st = computeState(setup, []);
+    expect(st.currentBet).toBe(2); // nominal BB == effective BB
+    expect(st.toCall).toBe(2);
+    expect(st.minRaiseTo).toBe(4);
+    expect(st.pot).toBe(3); // sb 1 + bb 2
+    expect(st.allIn).toEqual([]);
+  });
+});
+
 describe("resolveDealtSeats — mid-session BB-wait joiners", () => {
   const P = (
     seat: number,

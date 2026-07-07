@@ -166,11 +166,16 @@ export default function Setup() {
       : null;
   // Miss-blind posts contribute to the seeded pot too — without them the
   // preview number disagrees with what gets actually posted on Start Hand.
+  // Mirrors engine/setup.ts buildForcedBets: if the posting seat lands on the
+  // natural BB this hand, the BB itself covers the live post (skip the BB
+  // amount here) — but the dead post-ante still applies regardless.
   const previewPosts = roster
     .filter((p) => dealtSeats.includes(p.seat) && p.mustPostBB)
     .reduce(
       (sum, p) =>
-        sum + session.bb + (p.postWithAnte && session.ante > 0 ? session.ante : 0),
+        sum +
+        (p.seat !== previewBb ? session.bb : 0) +
+        (p.postWithAnte && session.ante > 0 ? session.ante : 0),
       0
     );
   const previewPot =
