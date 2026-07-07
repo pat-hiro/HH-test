@@ -108,6 +108,11 @@ export interface Hand extends Syncable {
   startedAt: number;
   endedAt: number | null;
   buttonSeat: number;
+  /** Hero's seat at the moment this hand was created — snapshotted so a later
+   *  seat swap doesn't retroactively repaint who Hero was in past hands.
+   *  Undefined for hands created before this field existed; readers fall back
+   *  to session.heroSeat for those. */
+  heroSeat?: number;
   // stakes snapshot
   sb: number;
   bb: number;

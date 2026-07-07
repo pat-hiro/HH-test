@@ -299,6 +299,10 @@ export const Settings = {
         ...existing,
         heroDefaultName: existing.heroDefaultName || "Hero",
         extraCurrencies: existing.extraCurrencies ?? [],
+        pfRaise: existing.pfRaise ?? DEFAULT_PRESETS.pfRaise,
+        pfRaiseStraddle: existing.pfRaiseStraddle ?? DEFAULT_PRESETS.pfRaiseStraddle,
+        postflopBet: existing.postflopBet ?? DEFAULT_PRESETS.postflopBet,
+        postflopRaise: existing.postflopRaise ?? DEFAULT_PRESETS.postflopRaise,
       };
     }
     return {
@@ -318,6 +322,10 @@ export const Settings = {
           ...existing,
           heroDefaultName: existing.heroDefaultName || "Hero",
           extraCurrencies: existing.extraCurrencies ?? [],
+          pfRaise: existing.pfRaise ?? DEFAULT_PRESETS.pfRaise,
+          pfRaiseStraddle: existing.pfRaiseStraddle ?? DEFAULT_PRESETS.pfRaiseStraddle,
+          postflopBet: existing.postflopBet ?? DEFAULT_PRESETS.postflopBet,
+          postflopRaise: existing.postflopRaise ?? DEFAULT_PRESETS.postflopRaise,
         }
       : {
           id: SETTINGS_ID,

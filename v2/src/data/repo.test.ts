@@ -190,6 +190,57 @@ describe("session + players + hands wiring", () => {
     expect(got?.id).toBe(h.id);
     expect(got?.seats.length).toBe(9);
   });
+
+  it("snapshots heroSeat onto the hand; older hands without it stay undefined", async () => {
+    const s = await Sessions.create({ ...seed(), heroSeat: 3 });
+    const withHero = await Hands.create({
+      sessionId: s.id,
+      handNo: 1,
+      startedAt: 1000,
+      endedAt: null,
+      buttonSeat: 1,
+      heroSeat: 3,
+      sb: 1,
+      bb: 2,
+      ante: 0,
+      autoStraddle: false,
+      straddleAmount: 0,
+      seats: [],
+      board: { flop: null, turn: null, river: null },
+      heroCards: null,
+      result: { winners: [], wentToShowdown: false, knownCards: [] },
+      pot: 0,
+      rake: 0,
+      note: "",
+      tags: [],
+      finalized: false,
+    });
+    expect((await Hands.get(withHero.id))?.heroSeat).toBe(3);
+
+    // a hand created before the field existed simply omits it
+    const legacy = await Hands.create({
+      sessionId: s.id,
+      handNo: 2,
+      startedAt: 1001,
+      endedAt: null,
+      buttonSeat: 1,
+      sb: 1,
+      bb: 2,
+      ante: 0,
+      autoStraddle: false,
+      straddleAmount: 0,
+      seats: [],
+      board: { flop: null, turn: null, river: null },
+      heroCards: null,
+      result: { winners: [], wentToShowdown: false, knownCards: [] },
+      pot: 0,
+      rake: 0,
+      note: "",
+      tags: [],
+      finalized: false,
+    });
+    expect((await Hands.get(legacy.id))?.heroSeat).toBeUndefined();
+  });
 });
 
 describe("actions: order is contiguous, UNDO pops the last one", () => {
@@ -378,6 +429,66 @@ describe("bankroll + settings", () => {
     expect(updated.baseCurrency).toBe("USD");
     const stored = await db.settings.get("singleton");
     expect(stored?.baseCurrency).toBe("USD");
+  });
+
+  it("Settings.get back-fills bet-preset arrays missing from an old singleton", async () => {
+    const { db } = await import("./db");
+    // Simulate a pre-existing row saved before the preset fields existed —
+    // has heroDefaultName/extraCurrencies (an earlier back-fill) but no
+    // pfRaise/pfRaiseStraddle/postflopBet/postflopRaise.
+    await db.settings.put({
+      id: "singleton",
+      updatedAt: 1,
+      deletedAt: 0,
+      baseCurrency: "JPY",
+      heroDefaultName: "Hero",
+      extraCurrencies: [],
+    } as never);
+    const s = await Settings.get();
+    expect(s.pfRaise.length).toBeGreaterThan(0);
+    expect(s.pfRaiseStraddle.length).toBeGreaterThan(0);
+    expect(s.postflopBet.length).toBeGreaterThan(0);
+    expect(s.postflopRaise.length).toBeGreaterThan(0);
+    // back-fill is read-only, same invariant as the defaults-row case above
+    expect(await db.settings.get("singleton")).not.toHaveProperty("pfRaise");
+  });
+
+  it("Settings.get keeps an existing (even custom) preset array instead of overwriting it", async () => {
+    const { db } = await import("./db");
+    const customPfRaise = [{ label: "2.2x", multiplier: 2.2, basis: "prev" as const }];
+    await db.settings.put({
+      id: "singleton",
+      updatedAt: 1,
+      deletedAt: 0,
+      baseCurrency: "JPY",
+      heroDefaultName: "Hero",
+      extraCurrencies: [],
+      pfRaise: customPfRaise,
+      pfRaiseStraddle: [],
+      postflopBet: [],
+      postflopRaise: [],
+    } as never);
+    const s = await Settings.get();
+    expect(s.pfRaise).toEqual(customPfRaise);
+    // deliberately-emptied arrays are a real value, not "missing" — kept as-is
+    expect(s.postflopBet).toEqual([]);
+  });
+
+  it("Settings.update back-fills missing preset arrays onto an old singleton when patching an unrelated field", async () => {
+    const { db } = await import("./db");
+    await db.settings.put({
+      id: "singleton",
+      updatedAt: 1,
+      deletedAt: 0,
+      baseCurrency: "JPY",
+      heroDefaultName: "Hero",
+      extraCurrencies: [],
+    } as never);
+    const updated = await Settings.update({ baseCurrency: "EUR" });
+    expect(updated.baseCurrency).toBe("EUR");
+    expect(updated.pfRaise.length).toBeGreaterThan(0);
+    const stored = await db.settings.get("singleton");
+    expect(stored?.pfRaise?.length).toBeGreaterThan(0);
   });
 });
 

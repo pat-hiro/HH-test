@@ -215,6 +215,21 @@ function HandDetail({ hand }: { hand: Hand }) {
   const session = useLiveQuery(() => db.sessions.get(hand.sessionId), [hand.sessionId]);
   const summary = useMemo(() => {
     if (!stored) return null;
+    // Same miss-blind-post adapter Hand.tsx uses — without it a hand with a
+    // returning-player post understates spentTotal and overstates net.
+    const posts = hand.seats.flatMap((s) =>
+      s.posted.flatMap((p) =>
+        p.kind === "post"
+          ? [
+              {
+                seat: s.seat,
+                amount: p.amount,
+                ante: s.posted.find((x) => x.kind === "post_ante")?.amount,
+              },
+            ]
+          : []
+      )
+    );
     const setup = makeSetup({
       seats: hand.seats.map((s) => ({ seat: s.seat, startStack: s.startStack })),
       seatCount: Math.max(...hand.seats.map((s) => s.seat), 2),
@@ -224,6 +239,7 @@ function HandDetail({ hand }: { hand: Hand }) {
       bbAnte: hand.ante,
       autoStraddle: hand.autoStraddle,
       straddleAmount: hand.straddleAmount > 0 ? hand.straddleAmount : undefined,
+      posts: posts.length > 0 ? posts : undefined,
     });
     const engineActions = stored.map((a) => ({
       street: a.street,
@@ -242,6 +258,11 @@ function HandDetail({ hand }: { hand: Hand }) {
   );
   const knownBySeat = new Map<number, [string, string]>();
   for (const k of hand.result.knownCards) knownBySeat.set(k.seat, k.cards);
+  // Prefer the hero seat snapshotted onto the hand itself — falls back to the
+  // session's CURRENT hero seat only for hands saved before that field
+  // existed, so a mid-session seat swap can't repaint who Hero was in a past
+  // hand.
+  const handHeroSeat = hand.heroSeat ?? session?.heroSeat ?? null;
 
   return (
     <div className="border-t border-neutral-800 p-3 space-y-3 text-xs">
@@ -260,7 +281,7 @@ function HandDetail({ hand }: { hand: Hand }) {
           const spent = summary.spentTotal[s.seat] ?? 0;
           const won = hand.result.winners.find((w) => w.seat === s.seat)?.amount ?? 0;
           const net = won - spent;
-          const isHero = session?.heroSeat === s.seat;
+          const isHero = handHeroSeat === s.seat;
           const cards = isHero
             ? hand.heroCards
             : knownBySeat.get(s.seat) ?? null;

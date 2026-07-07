@@ -94,9 +94,19 @@ export default function Setup() {
     [roster]
   );
 
+  // Seats that will ACTUALLY be dealt into the next hand — the same set
+  // startHand's resolveDealtSeats computes. activeSeats includes "waiting for
+  // BB" joiners who aren't dealt in yet; using it for the preview disagreed
+  // with the real SB/BB/UTG/pot/positions startHand produces.
+  const dealtSeats = useMemo(() => {
+    if (!session || session.buttonSeat === null) return [];
+    return resolveDealtSeats(roster ?? [], session.buttonSeat, session.seatCount)
+      .dealt;
+  }, [roster, session?.buttonSeat, session?.seatCount]);
+
   const positions = useMemo(
-    () => positionLabels(activeSeats, session?.buttonSeat ?? null),
-    [activeSeats, session?.buttonSeat]
+    () => positionLabels(dealtSeats, session?.buttonSeat ?? null),
+    [dealtSeats, session?.buttonSeat]
   );
 
   // For the End-Session bankroll prefill, compute Hero's session aggregate:
@@ -144,20 +154,20 @@ export default function Setup() {
   // BTN assigned + ≥2 active seats; else falls back to no chips on the felt.
   const previewSb =
     session.buttonSeat !== null
-      ? sbSeat(session.buttonSeat, session.seatCount, activeSeats)
+      ? sbSeat(session.buttonSeat, session.seatCount, dealtSeats)
       : null;
   const previewBb =
     session.buttonSeat !== null
-      ? bbSeat(session.buttonSeat, session.seatCount, activeSeats)
+      ? bbSeat(session.buttonSeat, session.seatCount, dealtSeats)
       : null;
   const previewUtg =
     previewBb !== null
-      ? nextActive(previewBb, session.seatCount, activeSeats)
+      ? nextActive(previewBb, session.seatCount, dealtSeats)
       : null;
   // Miss-blind posts contribute to the seeded pot too — without them the
   // preview number disagrees with what gets actually posted on Start Hand.
   const previewPosts = roster
-    .filter((p) => activeSeats.includes(p.seat) && p.mustPostBB)
+    .filter((p) => dealtSeats.includes(p.seat) && p.mustPostBB)
     .reduce(
       (sum, p) =>
         sum + session.bb + (p.postWithAnte && session.ante > 0 ? session.ante : 0),
@@ -369,6 +379,7 @@ export default function Setup() {
         startedAt: Date.now(),
         endedAt: null,
         buttonSeat: session.buttonSeat!,
+        heroSeat: session.heroSeat ?? undefined,
         sb: session.sb,
         bb: session.bb,
         ante: session.ante,
@@ -789,6 +800,7 @@ export default function Setup() {
               isAway: pb.isAway,
               mustPostBB: pb.mustPostBB,
               postWithAnte: pb.postWithAnte,
+              waitingForBB: pb.waitingForBB,
               note: pb.note,
             });
             await Players.update(pb.id, {
@@ -798,6 +810,7 @@ export default function Setup() {
               isAway: pa.isAway,
               mustPostBB: pa.mustPostBB,
               postWithAnte: pa.postWithAnte,
+              waitingForBB: pa.waitingForBB,
               note: pa.note,
             });
             if (session.heroSeat === a)

@@ -995,6 +995,7 @@ export default function Hand() {
         startedAt: Date.now(),
         endedAt: null,
         buttonSeat: next,
+        heroSeat: session.heroSeat ?? undefined,
         sb: hand.sb,
         bb: hand.bb,
         ante: hand.ante,
