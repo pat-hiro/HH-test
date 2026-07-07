@@ -359,7 +359,9 @@ export default function Setup() {
         .map((p) => ({
           seat: p.seat,
           name: p.name,
-          startStack: p.stack ?? 0,
+          // untracked stack (null) shouldn't deal the seat in dead-stacked —
+          // 200 mirrors the roster's own new-player default (see newSession).
+          startStack: p.stack ?? 200,
           posted: p.mustPostBB
             ? [
                 { kind: "post" as const, amount: session.bb },
@@ -780,6 +782,7 @@ export default function Setup() {
               isAway: false,
               mustPostBB: false,
               postWithAnte: false,
+              waitingForBB: false,
             });
             if (session.heroSeat === seat)
               await Sessions.update(session.id, { heroSeat: null });

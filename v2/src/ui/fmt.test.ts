@@ -22,6 +22,10 @@ describe("fmtChips", () => {
     expect(fmtChips(1_500_000)).toBe("1.5M");
     expect(fmtChips(12_300_000)).toBe("12.3M");
   });
+  it("carries a round-up into the next unit instead of showing 1000k", () => {
+    expect(fmtChips(999_950)).toBe("1M");
+    expect(fmtChips(999_499)).toBe("999k");
+  });
   it("keeps decimals for sub-100 values", () => {
     expect(fmtChips(0.5)).toBe("0.5");
     expect(fmtChips(2.5)).toBe("2.5");

@@ -43,18 +43,26 @@ export default function Bankroll() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState<null | "SESSION" | "TRANSACTION">(null);
 
-  const baseCcy = settings?.baseCurrency ?? "JPY";
+  const baseCcy = settings?.baseCurrency || "JPY";
 
   const stats = useMemo(() => {
     if (!entries) return null;
     const total = entries.reduce((s, e) => s + toBase(e), 0);
     const sessionEntries = entries.filter((e) => e.type === "SESSION");
     const sessionNet = sessionEntries.reduce((s, e) => s + toBase(e), 0);
-    const sessionMinutes = sessionEntries.reduce(
+    // Hourly (blended) rate uses ONLY timed sessions — an untimed session's
+    // net would otherwise land in the numerator with 0 minutes in the
+    // denominator, skewing the rate toward whatever untimed entries happened
+    // to win or lose.
+    const timedEntries = sessionEntries.filter(
+      (e) => entryDurationMin(e) !== null
+    );
+    const timedNet = timedEntries.reduce((s, e) => s + toBase(e), 0);
+    const timedMinutes = timedEntries.reduce(
       (s, e) => s + (entryDurationMin(e) ?? 0),
       0
     );
-    const hourly = sessionMinutes > 0 ? (sessionNet / sessionMinutes) * 60 : null;
+    const hourly = timedMinutes > 0 ? (timedNet / timedMinutes) * 60 : null;
     const wins = sessionEntries.filter((e) => entryNet(e) > 0).length;
     const losses = sessionEntries.filter((e) => entryNet(e) < 0).length;
     // Win rate excludes break-even sessions from BOTH the numerator and the
@@ -66,7 +74,7 @@ export default function Bankroll() {
       sessionCount: sessionEntries.length,
       sessionNet,
       hourly,
-      hours: sessionMinutes / 60,
+      hours: timedMinutes / 60,
       winRate: decided > 0 ? (wins / decided) * 100 : null,
       wins,
       losses,

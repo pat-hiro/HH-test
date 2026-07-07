@@ -130,11 +130,16 @@ export default function BankrollEntrySheet({
                 // When the user switches the entry's currency TO the base,
                 // also snap the rate to 1 so we don't carry over a stale
                 // foreign rate that would multiply the base total wrongly.
+                const wasBase =
+                  draft.currency.length === 3 && draft.currency === baseCurrency;
                 const sameAsBase = next.length === 3 && next === baseCurrency;
                 setDraft({
                   ...draft,
                   currency: next,
-                  exchangeRate: sameAsBase ? 1 : draft.exchangeRate,
+                  // Leaving the base currency must NOT carry the base's rate=1
+                  // forward — $500 would silently book as ¥500. Reset to 0 so
+                  // the save guard below forces a real rate to be entered.
+                  exchangeRate: sameAsBase ? 1 : wasBase ? 0 : draft.exchangeRate,
                 });
               }}
               maxLength={3}

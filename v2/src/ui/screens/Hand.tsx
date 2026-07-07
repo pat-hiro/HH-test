@@ -20,8 +20,11 @@ import EventSheet from "../components/EventSheet";
 import { PlayerEditSheet } from "../components/SetupSheets";
 import { positionLabels } from "../positions";
 import { fmtChips } from "../fmt";
+import { splitEvenly as splitPot } from "../split";
 
 // ----- helpers --------------------------------------------------------------
+
+const STREETS: Street[] = ["PF", "F", "T", "R"];
 
 function streetTitle(s: Street): string {
   return s === "PF" ? "PREFLOP" : s === "F" ? "FLOP" : s === "T" ? "TURN" : "RIVER";
@@ -444,6 +447,18 @@ export default function Hand() {
     return live + Math.max(0, snap.startStack - spent);
   }
 
+  /** Does committing `a` on top of `st` use up the seat's entire remaining
+   *  stack? A bet/raise/call clamped to the stack (maxTotalFor) is a real
+   *  all-in even though its Action.type stays "bet"/"raise"/"call" — CSV
+   *  export and replay both need isAllIn to reflect that. */
+  function spendsWholeStack(st: HandState, a: EngineAction): boolean {
+    if (a.type === "allin") return true;
+    const snap = hand?.seats.find((s) => s.seat === a.seat);
+    if (!snap) return false;
+    const spentAfter = (st.spentTotal[a.seat] ?? 0) + a.amount;
+    return spentAfter >= snap.startStack;
+  }
+
   /** Resolve `intent` against the freshest engine state, then append the
    *  resulting action atomically. `resolve` returns null to abort. */
   function commit(resolve: (st: HandState) => Move | null) {
@@ -460,7 +475,7 @@ export default function Hand() {
         seat: a.seat,
         type: a.type,
         amount: a.amount,
-        isAllIn: a.type === "allin",
+        isAllIn: spendsWholeStack(st, a),
       });
     });
   }
@@ -682,21 +697,32 @@ export default function Hand() {
           amount: a.amount,
         }))
       ).street;
-      const ofStreet = rows.filter((a) => a.street === cur);
+      // The current street may have zero actions yet (just crossed into it,
+      // nobody has acted) — in that case there's nothing here to undo, so
+      // back up to the PREVIOUS street's actions/board instead, or this
+      // button would clear an already-empty board and get stuck forever.
+      let target = cur;
+      let ofStreet = rows.filter((a) => a.street === target);
+      if (ofStreet.length === 0) {
+        const idx = STREETS.indexOf(cur);
+        if (idx === 0) return; // PF with nothing recorded — nothing to undo
+        target = STREETS[idx - 1];
+        ofStreet = rows.filter((a) => a.street === target);
+      }
       for (const a of ofStreet) await Actions.remove(a.id);
-      if (cur === "F") {
+      if (target === "F") {
         await Hands.update(hand.id, {
           board: { ...hand.board, flop: null, turn: null, river: null },
         });
-      } else if (cur === "T") {
+      } else if (target === "T") {
         await Hands.update(hand.id, {
           board: { ...hand.board, turn: null, river: null },
         });
-      } else if (cur === "R") {
+      } else if (target === "R") {
         await Hands.update(hand.id, { board: { ...hand.board, river: null } });
       }
       // also wipe the auto-prompt memo so the next visit re-prompts cleanly
-      promptedRef.current[cur] = false;
+      promptedRef.current[target] = false;
     });
 
   const saveHeroCards = async (cards: (string | null)[]) => {
@@ -767,10 +793,9 @@ export default function Hand() {
     for (const pot of pots) {
       const winners = pot.eligible.filter((s) => survSet.has(s));
       if (winners.length === 0) continue;
-      const each = Math.floor(pot.amount / winners.length);
-      const rem = pot.amount - each * winners.length;
+      const shares = splitPot(pot.amount, winners.length);
       winners.forEach((s, i) => {
-        m[s] += each + (i === 0 ? rem : 0);
+        m[s] += shares[i];
       });
     }
     const out: Record<number, string> = {};
@@ -979,7 +1004,9 @@ export default function Hand() {
         .map((p) => ({
           seat: p.seat,
           name: p.name,
-          startStack: p.stack ?? 0,
+          // untracked stack (null) shouldn't deal the seat in dead-stacked —
+          // 200 mirrors the roster's own new-player default (see newSession).
+          startStack: p.stack ?? 200,
           posted: p.mustPostBB
             ? [
                 { kind: "post" as const, amount: hand.bb },

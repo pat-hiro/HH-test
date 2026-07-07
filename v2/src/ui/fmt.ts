@@ -14,7 +14,9 @@ export function fmtChips(n: number): string {
   const abs = Math.abs(n);
   const sign = n < 0 ? "-" : "";
 
-  if (abs >= 1_000_000) {
+  // round-up carry: a value that rounds to 1000k (e.g. 999,950) must render
+  // as the next unit up, not "1000k".
+  if (abs >= 1_000_000 || Math.round(abs / 1_000) >= 1_000) {
     return sign + trimZeros(round(abs / 1_000_000, abs / 1_000_000 < 100 ? 1 : 0)) + "M";
   }
   if (abs >= 1_000) {
